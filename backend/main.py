@@ -1,16 +1,39 @@
+# backend/main.py
+# ================================================================
+# FASTAPI APPLICATION — Entry point backend Aspiralytica
+# ================================================================
+
+import json
+import os
+import hashlib
+import logging
+
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-import hashlib
 
 from database import (
-    init_db, insert_report, get_all_reports,
+    init_db,
+    insert_report, get_all_reports,
     get_report_by_id, delete_report, update_report_status,
     create_user, get_user_by_email,
 )
+from models import (
+    AnalyzeRequest, AnalyzeResponse,
+    UpdateStatusRequest,
+    RegisterRequest, LoginRequest,
+    LoginResponse, RegisterResponse,
+    DeleteResponse, MetricsResponse, HealthResponse,
+)
 from ml.classifier import classifier
 
-app = FastAPI(title="Aspiralytica API", version="1.0.0")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+app = FastAPI(
+    title="Aspiralytica API",
+    description="AI-Powered Public Report Analysis System",
+    version="2.0.0",
+)
 
 app.add_middleware(
     CORSMiddleware,
@@ -20,52 +43,42 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.on_event("startup")
 def startup():
     init_db()
+    if classifier is None:
+        logger.warning(
+            "⚠️  Model belum ditraining! Jalankan: python -m ml.train"
+        )
+    else:
+        logger.info("✅ Aspiralytica API siap. Model berhasil dimuat.")
 
-# =============================================
-# MODELS
-# =============================================
 
-class AnalyzeRequest(BaseModel):
-    text: str
+# ================================================================
+# HEALTH CHECK
+# ================================================================
 
-class AnalyzeResponse(BaseModel):
-    id: int
-    text: str
-    sentiment: str
-    intent: str
-    priority: str
-    status: str
-    created_at: str
-
-class UpdateStatusRequest(BaseModel):
-    status: str  # menunggu | diproses | selesai
-
-class RegisterRequest(BaseModel):
-    name: str
-    email: str
-    password: str
-
-class LoginRequest(BaseModel):
-    email: str
-    password: str
-
-# =============================================
-# ENDPOINTS — Analisis
-# =============================================
-
-@app.get("/")
+@app.get("/", response_model=HealthResponse)
 def root():
-    return {"message": "Aspiralytica API is running 🚀"}
+    return {
+        "status": "ok",
+        "message": "Aspiralytica API is running 🚀",
+        "model_loaded": classifier is not None,
+    }
+
+
+# ================================================================
+# ANALISIS LAPORAN
+# ================================================================
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 def analyze(request: AnalyzeRequest):
-    if not request.text.strip():
-        raise HTTPException(status_code=400, detail="Teks laporan tidak boleh kosong")
-    if len(request.text.strip()) < 10:
-        raise HTTPException(status_code=400, detail="Teks minimal 10 karakter")
+    if classifier is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Model belum tersedia. Jalankan: python -m ml.train"
+        )
 
     result = classifier.analyze(request.text)
 
@@ -74,12 +87,19 @@ def analyze(request: AnalyzeRequest):
         sentiment=result["sentiment"],
         intent=result["intent"],
         priority=result["priority"],
+        is_sarcasm=result["is_sarcasm"],
     )
     return get_report_by_id(report_id)
+
+
+# ================================================================
+# RIWAYAT LAPORAN
+# ================================================================
 
 @app.get("/history", response_model=list[AnalyzeResponse])
 def history():
     return get_all_reports()
+
 
 @app.get("/history/{report_id}", response_model=AnalyzeResponse)
 def get_one(report_id: int):
@@ -88,44 +108,69 @@ def get_one(report_id: int):
         raise HTTPException(status_code=404, detail="Laporan tidak ditemukan")
     return report
 
-@app.delete("/history/{report_id}")
+
+@app.delete("/history/{report_id}", response_model=DeleteResponse)
 def delete_one(report_id: int):
-    report = get_report_by_id(report_id)
-    if not report:
+    if not get_report_by_id(report_id):
         raise HTTPException(status_code=404, detail="Laporan tidak ditemukan")
     delete_report(report_id)
     return {"message": "Laporan berhasil dihapus"}
 
-@app.patch("/history/{report_id}/status")
+
+@app.patch("/history/{report_id}/status", response_model=AnalyzeResponse)
 def update_status(report_id: int, request: UpdateStatusRequest):
     valid = ["menunggu", "diproses", "selesai"]
     if request.status not in valid:
-        raise HTTPException(status_code=400, detail=f"Status harus salah satu dari: {valid}")
-    report = get_report_by_id(report_id)
-    if not report:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Status harus salah satu dari: {valid}"
+        )
+    if not get_report_by_id(report_id):
         raise HTTPException(status_code=404, detail="Laporan tidak ditemukan")
     update_report_status(report_id, request.status)
     return get_report_by_id(report_id)
 
-# =============================================
-# ENDPOINTS — Auth
-# =============================================
 
-@app.post("/auth/register")
+# ================================================================
+# MODEL METRICS (berguna untuk paper/skripsi)
+# ================================================================
+
+@app.get("/metrics", response_model=MetricsResponse)
+def get_metrics():
+    """
+    Mengembalikan hasil evaluasi model dari training terakhir.
+    Data diambil dari ml/models/metrics.json
+    """
+    metrics_path = os.path.join("ml", "models", "metrics.json")
+    if not os.path.exists(metrics_path):
+        raise HTTPException(
+            status_code=404,
+            detail="Metrics belum tersedia. Jalankan: python -m ml.train"
+        )
+    with open(metrics_path, "r") as f:
+        return json.load(f)
+
+
+# ================================================================
+# AUTH
+# ================================================================
+
+@app.post("/auth/register", response_model=RegisterResponse)
 def register(request: RegisterRequest):
-    if not request.name.strip() or not request.email.strip() or not request.password.strip():
-        raise HTTPException(status_code=400, detail="Semua field wajib diisi")
-    if len(request.password) < 6:
-        raise HTTPException(status_code=400, detail="Password minimal 6 karakter")
     try:
-        user = create_user(request.name.strip(), request.email.strip(), request.password)
+        user = create_user(
+            request.name.strip(),
+            request.email.strip().lower(),
+            request.password,
+        )
         return {"message": "Akun berhasil dibuat", "user": user}
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
-@app.post("/auth/login")
+
+@app.post("/auth/login", response_model=LoginResponse)
 def login(request: LoginRequest):
-    user = get_user_by_email(request.email.strip())
+    user = get_user_by_email(request.email.strip().lower())
     if not user:
         raise HTTPException(status_code=401, detail="Email atau password salah")
     hashed = hashlib.sha256(request.password.encode()).hexdigest()
@@ -133,5 +178,5 @@ def login(request: LoginRequest):
         raise HTTPException(status_code=401, detail="Email atau password salah")
     return {
         "message": "Login berhasil",
-        "user": {"id": user["id"], "name": user["name"], "email": user["email"]}
+        "user": {"id": user["id"], "name": user["name"], "email": user["email"]},
     }

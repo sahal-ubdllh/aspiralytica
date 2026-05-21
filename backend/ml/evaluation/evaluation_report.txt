@@ -1,0 +1,53 @@
+ASPIRALYTICA — EVALUATION REPORT
+Generated: 2026-05-19 21:11:35
+=======================================================
+
+[ NAIVE BAYES MODEL — SENTIMENT ]
+10-Fold CV Accuracy : 0.9554 ± 0.0350
+10-Fold CV F1-Score : 0.9548 ± 0.0359
+
+Classification Report (80:20 split):
+              precision    recall  f1-score   support
+
+    negative     1.0000    0.9565    0.9778        23
+     neutral     0.9429    0.9706    0.9565        34
+    positive     0.9583    0.9583    0.9583        24
+
+    accuracy                         0.9630        81
+   macro avg     0.9671    0.9618    0.9642        81
+weighted avg     0.9637    0.9630    0.9631        81
+
+[ NAIVE BAYES MODEL — INTENT ]
+10-Fold CV Accuracy : 0.9362 ± 0.0266
+10-Fold CV F1-Score : 0.9359 ± 0.0265
+
+Classification Report (80:20 split):
+              precision    recall  f1-score   support
+
+appreciation     1.0000    0.7857    0.8800        28
+   emergency     1.0000    0.9615    0.9804        26
+   complaint     0.8333    1.0000    0.9091        55
+     request     1.0000    0.8710    0.9310        31
+  suggestion     0.9333    0.9333    0.9333        30
+
+    accuracy                         0.9235       170
+   macro avg     0.9533    0.9103    0.9268       170
+weighted avg     0.9343    0.9235    0.9235       170
+
+[ MODEL COMPARISON — SENTIMENT ]
+Model                            Accuracy  Precision     Recall         F1
+----------------------------------------------------------------------
+Naive Bayes (Proposed)             0.9554     0.9595     0.9554     0.9548
+SVM                                0.9553     0.9597     0.9553     0.9544
+Decision Tree                      0.8194     0.8344     0.8194     0.8191
+Random Forest                      0.9256     0.9329     0.9256     0.9251
+Logistic Regression                0.9430     0.9483     0.9430     0.9421
+
+[ MODEL COMPARISON — INTENT ]
+Model                            Accuracy  Precision     Recall         F1
+----------------------------------------------------------------------
+Naive Bayes (Proposed)             0.9362     0.9408     0.9362     0.9359
+SVM                                0.9658     0.9676     0.9658     0.9655
+Decision Tree                      0.8560     0.8631     0.8560     0.8555
+Random Forest                      0.9375     0.9437     0.9375     0.9369
+Logistic Regression                0.9350     0.9426     0.9350     0.9349
