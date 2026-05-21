@@ -21,4 +21,4 @@
 // const BASE_URL = 'https://aspiralytica-backend.up.railway.app';
  
 // ↓↓↓ AKTIFKAN SATU BARIS INI, SISANYA TETAP COMMENT ↓↓↓
-export const BASE_URL = 'http://192.168.1.7:8000';
+export const BASE_URL = 'aspiralytica-production.up.railway.app';
