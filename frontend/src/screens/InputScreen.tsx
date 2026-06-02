@@ -89,10 +89,10 @@ export default function InputScreen({ navigation }: any) {
             )}
             <Text style={[
               styles.charCount,
-              text.length > 450 && { color: Colors.warning },
-              text.length >= 500 && { color: Colors.danger },
+              text.length > 950 && { color: Colors.warning },
+              text.length >= 1000 && { color: Colors.danger },
             ]}>
-              {text.length}/500
+              {text.length}/1000
             </Text>
           </View>
         </View>
