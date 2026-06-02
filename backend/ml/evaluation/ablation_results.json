@@ -1,0 +1,200 @@
+{
+  "sentiment": {
+    "results": [
+      {
+        "variant": "Rule-Based Only",
+        "task": "sentiment",
+        "accuracy": {
+          "mean": 0.8319,
+          "std": 0.0236
+        },
+        "precision": {
+          "mean": 0.8342,
+          "std": 0.023
+        },
+        "recall": {
+          "mean": 0.8319,
+          "std": 0.0236
+        },
+        "f1": {
+          "mean": 0.831,
+          "std": 0.0242
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n     negatif       0.91      0.93      0.92       310\n      netral       0.79      0.79      0.79       300\n     positif       0.80      0.77      0.78       300\n\n    accuracy                           0.83       910\n   macro avg       0.83      0.83      0.83       910\nweighted avg       0.83      0.83      0.83       910\n"
+      },
+      {
+        "variant": "ML Only (TF-IDF + MNB)",
+        "task": "sentiment",
+        "accuracy": {
+          "mean": 0.9659,
+          "std": 0.0104
+        },
+        "precision": {
+          "mean": 0.9671,
+          "std": 0.0101
+        },
+        "recall": {
+          "mean": 0.9659,
+          "std": 0.0104
+        },
+        "f1": {
+          "mean": 0.9659,
+          "std": 0.0103
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n     negatif       0.95      0.95      0.95       310\n      netral       0.97      0.96      0.97       300\n     positif       0.98      0.98      0.98       300\n\n    accuracy                           0.97       910\n   macro avg       0.97      0.97      0.97       910\nweighted avg       0.97      0.97      0.97       910\n"
+      },
+      {
+        "variant": "ML + Sarcasm Detection",
+        "task": "sentiment",
+        "accuracy": {
+          "mean": 0.9681,
+          "std": 0.0125
+        },
+        "precision": {
+          "mean": 0.9693,
+          "std": 0.0123
+        },
+        "recall": {
+          "mean": 0.9681,
+          "std": 0.0125
+        },
+        "f1": {
+          "mean": 0.9682,
+          "std": 0.0124
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n     negatif       0.95      0.96      0.96       310\n      netral       0.97      0.96      0.97       300\n     positif       0.99      0.98      0.98       300\n\n    accuracy                           0.97       910\n   macro avg       0.97      0.97      0.97       910\nweighted avg       0.97      0.97      0.97       910\n"
+      },
+      {
+        "variant": "Hybrid (Full System)",
+        "task": "sentiment",
+        "accuracy": {
+          "mean": 0.8912,
+          "std": 0.0211
+        },
+        "precision": {
+          "mean": 0.9004,
+          "std": 0.0193
+        },
+        "recall": {
+          "mean": 0.8912,
+          "std": 0.0211
+        },
+        "f1": {
+          "mean": 0.8905,
+          "std": 0.0214
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n     negatif       0.90      0.95      0.93       310\n      netral       0.98      0.79      0.87       300\n     positif       0.82      0.93      0.87       300\n\n    accuracy                           0.89       910\n   macro avg       0.90      0.89      0.89       910\nweighted avg       0.90      0.89      0.89       910\n"
+      }
+    ],
+    "coverage": {
+      "total": 910,
+      "rule_covered": 625,
+      "rule_coverage_pct": 68.68131868131869,
+      "rule_correct": 535,
+      "rule_precision_when_covered": 85.6,
+      "ml_fallback": 285,
+      "ml_fallback_pct": 31.318681318681318,
+      "sarcasm_detected": 15,
+      "sarcasm_pct": 1.6483516483516485
+    }
+  },
+  "intent": {
+    "results": [
+      {
+        "variant": "Rule-Based Only",
+        "task": "intent",
+        "accuracy": {
+          "mean": 0.692,
+          "std": 0.0299
+        },
+        "precision": {
+          "mean": 0.8191,
+          "std": 0.0141
+        },
+        "recall": {
+          "mean": 0.692,
+          "std": 0.0299
+        },
+        "f1": {
+          "mean": 0.7006,
+          "std": 0.0332
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n   apresiasi       0.95      0.50      0.65       350\n     darurat       0.99      0.64      0.78       350\n     keluhan       0.44      0.93      0.60       350\n  permintaan       0.74      0.85      0.79       350\n       saran       0.97      0.54      0.70       350\n\n    accuracy                           0.69      1750\n   macro avg       0.82      0.69      0.70      1750\nweighted avg       0.82      0.69      0.70      1750\n"
+      },
+      {
+        "variant": "ML Only (TF-IDF + MNB)",
+        "task": "intent",
+        "accuracy": {
+          "mean": 0.9697,
+          "std": 0.0106
+        },
+        "precision": {
+          "mean": 0.9702,
+          "std": 0.0107
+        },
+        "recall": {
+          "mean": 0.9697,
+          "std": 0.0106
+        },
+        "f1": {
+          "mean": 0.9696,
+          "std": 0.0106
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n   apresiasi       0.99      0.99      0.99       350\n     darurat       0.98      0.99      0.99       350\n     keluhan       0.95      0.93      0.94       350\n  permintaan       0.98      0.96      0.97       350\n       saran       0.95      0.98      0.96       350\n\n    accuracy                           0.97      1750\n   macro avg       0.97      0.97      0.97      1750\nweighted avg       0.97      0.97      0.97      1750\n"
+      },
+      {
+        "variant": "ML + Sarcasm Detection",
+        "task": "intent",
+        "accuracy": {
+          "mean": 0.9537,
+          "std": 0.0118
+        },
+        "precision": {
+          "mean": 0.9562,
+          "std": 0.0105
+        },
+        "recall": {
+          "mean": 0.9537,
+          "std": 0.0118
+        },
+        "f1": {
+          "mean": 0.9537,
+          "std": 0.0117
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n   apresiasi       0.99      0.98      0.98       350\n     darurat       0.98      0.99      0.99       350\n     keluhan       0.87      0.94      0.90       350\n  permintaan       0.98      0.89      0.93       350\n       saran       0.95      0.98      0.96       350\n\n    accuracy                           0.95      1750\n   macro avg       0.96      0.95      0.95      1750\nweighted avg       0.96      0.95      0.95      1750\n"
+      },
+      {
+        "variant": "Hybrid (Full System)",
+        "task": "intent",
+        "accuracy": {
+          "mean": 0.8994,
+          "std": 0.022
+        },
+        "precision": {
+          "mean": 0.9117,
+          "std": 0.0173
+        },
+        "recall": {
+          "mean": 0.8994,
+          "std": 0.022
+        },
+        "f1": {
+          "mean": 0.8999,
+          "std": 0.0218
+        },
+        "classification_report": "              precision    recall  f1-score   support\n\n   apresiasi       0.97      0.99      0.98       350\n     darurat       0.98      0.75      0.85       350\n     keluhan       0.88      0.91      0.89       350\n  permintaan       0.74      0.89      0.81       350\n       saran       0.98      0.97      0.97       350\n\n    accuracy                           0.90      1750\n   macro avg       0.91      0.90      0.90      1750\nweighted avg       0.91      0.90      0.90      1750\n"
+      }
+    ],
+    "coverage": {
+      "total": 1750,
+      "rule_covered": 1232,
+      "rule_coverage_pct": 70.39999999999999,
+      "rule_correct": 1066,
+      "rule_precision_when_covered": 86.52597402597402,
+      "ml_fallback": 518,
+      "ml_fallback_pct": 29.599999999999998,
+      "sarcasm_detected": 50,
+      "sarcasm_pct": 2.857142857142857
+    }
+  }
+}

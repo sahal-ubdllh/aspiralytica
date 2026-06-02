@@ -1,0 +1,21 @@
+HASIL INTER-ANNOTATOR AGREEMENT (IAA) — ASPIRALYTICA
+Tanggal: 2026-05-29 13:45:57
+=================================================================
+
+  SENTIMEN    |  n=81  |  Agreement=79.0%  |  κ=0.6799  |  Substantial
+
+  INTENT      |  n=90  |  Agreement=78.9%  |  κ=0.7342  |  Substantial
+
+  📝  TEMPLATE UNTUK PAPER (Section 2.2):
+  ─────────────────────────────────────────────────────────────
+  "Annotation reliability was assessed through inter-annotator
+  agreement (IAA) on a stratified 20% subset of the corpus
+  (n = 81 sentiment samples, n = 90 intent samples),
+  independently labeled by a second annotator following the
+  same written guidelines. Cohen's Kappa coefficients of
+  κ = 0.68 for sentiment and κ = 0.73 for intent
+  indicate substantial agreement (Landis and Koch, 1977),
+  confirming the reliability of the annotation scheme.
+  Disagreements were resolved through adjudication by the
+  lead annotator."
+  ─────────────────────────────────────────────────────────────

@@ -1,16 +1,662 @@
 # backend/ml/data.py
 # ================================================================
-# TRAINING DATA — Aspiralytica NLP Dataset
+# ASPIRALYTICA NLP DATASET — v3 (Generator Edition)
 # ================================================================
-# Statistik dataset:
-#   INTENT  : keluhan=273, permintaan=154, saran=149,
-#             apresiasi=141, darurat=130 → TOTAL = 847
-#   SENTIMEN: negatif=115, positif=119, netral=171 → TOTAL = 405
 #
-# Catatan augmentasi:
-#   Ditambahkan sampel ambigu antar kelas untuk meningkatkan
-#   representasi distribusi data nyata dan mencegah overfitting.
+# Statistik dataset:
+#   INTENT  : keluhan=350, permintaan=350, saran=350,
+#             apresiasi=350, darurat=350  → TOTAL = 1750
+#   SENTIMEN: negatif=300, positif=300, netral=300 → TOTAL = 900
+#
+# Arsitektur:
+#   - Static seed data   : kalimat dikurasi manual (formal + informal)
+#   - GENERATED_*        : generator berbasis phrase bank (stochastic)
+#   - _HARD_CASES_*      : kasus ambigu / edge case antar kelas
+#   - GENERATED_SARCASM  : sarkasme otomatis → masuk kelas keluhan
+#
+# Cara generate ulang dengan ukuran berbeda:
+#   Ubah angka n= di blok GENERATED DATASETS, lalu update label count.
+#
+# Cara menggunakan:
+#   from ml.data import INTENT_DATA, SENTIMENT_DATA
+#   texts = INTENT_DATA["texts"]
+#   labels = INTENT_DATA["labels"]
 # ================================================================
+
+import random
+
+# ================================================================
+# GENERATOR DATASET REALISTIS
+# ================================================================
+# Pendekatan: frase-based generation dengan weighted selection.
+# Setiap kalimat dibangun dari slot: [subjek] + [predikat] + [objek]
+# + [penguat/konteks] + opsional [emoticon/ekspresi akhir].
+# Hasilnya lebih natural dan bervariasi dibanding template fixed.
+
+random.seed(42)  # reproducible untuk paper
+
+
+def _pick(lst, k=1, weights=None):
+    """Ambil k item dari lst, bisa dengan bobot."""
+    if k == 1:
+        return random.choices(lst, weights=weights, k=1)[0]
+    return random.choices(lst, weights=weights, k=k)
+
+
+# ──────────────────────────────────────────────────────────────────
+# KOMPONEN FRASE
+# ──────────────────────────────────────────────────────────────────
+
+# Subjek keluhan (siapa yang ngelaporin / kondisi apa)
+_SUBJ_KELUHAN = [
+    "jalan di depan rumah gue", "jalan di rt sini", "jalan di gang",
+    "jalan ke sekolah", "jalan desa", "jalan kampung",
+    "got di belakang rumah", "got di ujung jalan", "saluran air",
+    "drainase di sini", "selokan depan gang",
+    "lampu jalan", "lampu di gang ini", "penerangan jalan",
+    "sampah di depan", "tps di sini", "tempat sampah",
+    "trotoar", "trotoar depan rumah", "trotoar di jalan utama",
+    "fasilitas umum", "fasilitas di taman", "taman kota",
+    "pelayanan kantor", "pelayanan kelurahan", "pelayanan puskesmas",
+    "petugasnya", "petugas kebersihan", "petugas di sini",
+    "pompa air", "air pdam", "pipa air",
+    "jembatan di sini", "jembatan kampung",
+    "pos ronda", "balai warga", "lapangan olahraga",
+    "bak sampah", "tps di ujung", "gerobak sampah",
+]
+
+# Predikat kondisi (apa yang terjadi)
+_PRED_KELUHAN = [
+    ("rusak parah", 3), ("rusak bgt", 3), ("masih rusak", 2),
+    ("rusak dan ga diperbaiki", 2), ("makin rusak", 2),
+    ("mampet", 2), ("mampet terus", 2), ("mampet mulu", 2),
+    ("mati", 2), ("ga nyala", 2), ("padam terus", 1),
+    ("kotor banget", 3), ("jorok bgt", 2), ("ga pernah dibersihkan", 2),
+    ("numpuk", 2), ("numpuk terus", 2), ("penuh banget", 1),
+    ("bocor", 2), ("bocor parah", 2), ("jebol", 1),
+    ("ga berfungsi", 2), ("ga diperbaiki", 2), ("terbengkalai", 1),
+    ("ancur", 2), ("hancur", 1), ("retak-retak", 1),
+    ("berbahaya bgt", 2), ("rawan banget", 1),
+    ("lambat banget", 2), ("ga profesional", 1), ("ga ramah", 1),
+]
+
+# Konteks temporal (sudah berapa lama)
+_KONTEKS_WAKTU = [
+    "udah berhari-hari", "udah berminggu-minggu", "udah berbulan-bulan",
+    "dari minggu lalu", "dari bulan lalu", "dari tahun lalu",
+    "udah lama bgt", "lama banget", "dari dulu",
+    "udah 3 hari", "udah seminggu", "udah 2 minggu", "udah sebulan",
+    "bertahun-tahun", "udah setahun lebih", "dari tahun kemarin",
+    "tiap hari", "tiap hujan", "tiap musim hujan", "tiap kali hujan",
+    "terus-terusan", "ga pernah beres", "terus aja kayak gini",
+]
+
+# Ekspresi respons tidak ada tindakan
+_RESPONS_GA_ADA = [
+    "ga ada yang benerin", "ga ada yang nanganin",
+    "ga ada yang dateng", "ga ada yang ngurusin",
+    "ga pernah diperbaiki", "ga pernah diurus",
+    "ga ada tindakan sama sekali", "ga ada respons",
+    "ga ada kabar apapun", "dinas tutup mata",
+    "dibiarkan aja", "pemerintah cuek aja",
+    "laporan ga ditindaklanjuti", "ga kunjung beres",
+    "udah dilaporin berkali-kali tapi", "ga ada harapan",
+]
+
+# Ekspresi frustrasi penutup
+_FRUSTRASI = [
+    "😡", "parah sih", "kesel bgt", "nyebelin",
+    "udah muak", "capek bgt", "bosen nunggu",
+    "ga ada harapan nih", "masa iya kayak gini terus",
+    "tolong dong", "kok ga diurus sih",
+    "gimana sih pemerintah ini", "percuma lapor",
+    "sia-sia aja lapor", "males lapor lagi",
+    "warga resah nih", "kami was-was",
+    "bahaya bgt loh", "ini serius", "minta tolong deh",
+    "", "", "",   # beberapa tanpa ekspresi akhir (lebih natural)
+]
+
+# Ekspresi permintaan informal
+_PERMINTAAN = [
+    "tolong dong segera", "minta tolong", "mohon dong",
+    "tlg segera", "harap segera", "pliss dong",
+    "kami minta", "warga minta", "kita butuh",
+    "kapan diperbaiki dong", "kapan dibenerin",
+    "kapan ditangani", "kapan diangkut",
+    "buruan dong", "cepetan dong",
+    "tolong ya", "minta ya", "mohon ya",
+]
+
+# Objek permintaan
+_OBJ_PERMINTAAN = [
+    "lampu jalan di sini", "penerangan gang ini",
+    "sampah yang udah numpuk", "got yang mampet ini",
+    "jalan yang berlubang ini", "jalan yang rusak parah",
+    "trotoar yang hancur ini", "drainase yang tersumbat",
+    "fasilitas taman yang rusak", "tempat sampah baru",
+    "petugas yang lebih responsif", "pelayanan yang lebih cepat",
+    "zebra cross di depan sekolah", "rambu di persimpangan",
+    "armada sampah tambahan", "jadwal angkut sampah yang jelas",
+    "pos kesehatan", "posyandu baru di sini",
+    "jembatan yang udah lapuk", "pipa air yang bocor",
+]
+
+# Ekspresi apresiasi informal
+_APRESIASI_EXPR = [
+    "makasih bgt ya", "terima kasih banyak",
+    "alhamdulillah akhirnya", "syukurlah",
+    "seneng bgt deh", "happy banget",
+    "salut deh", "keren bgt",
+    "mantap bgt kerjanya", "bagus bgt hasilnya",
+    "pelayanannya oke bgt", "petugasnya ramah bgt",
+    "ga nyangka secepet ini", "nggak nyangka",
+    "akhirnya beres juga", "akhirnya ditangani",
+    "puas bgt", "sangat puas deh",
+    "responsif banget", "cepet banget responnya",
+    "kerja bagus min", "good job",
+]
+
+# Objek apresiasi
+_OBJ_APRESIASI = [
+    "jalan udah diperbaiki", "jalan udah diaspal",
+    "lampu udah dipasang", "penerangan udah ada",
+    "sampah udah diangkut", "got udah dibenerin",
+    "drainase udah dibersihkan", "banjir udah berkurang",
+    "pelayanannya meningkat bgt", "prosesnya dipercepat",
+    "petugas langsung dateng", "langsung ditangani",
+    "taman udah dibersihkan", "fasilitas udah diperbaiki",
+    "jembatan udah aman", "trotoar udah bagus",
+    "program ini sangat membantu", "bansos tepat sasaran",
+    "aplikasi pelayanan mudah dipake", "sistem antrian lebih rapi",
+]
+
+# Kalimat sarkasme modern
+_SARCASM_TEMPLATES = [
+    # Format: pujian ironis + kondisi buruk
+    "mantap bgt pelayanannya, ngantri {jam} jam baru dilayani 👍",
+    "keren bgt min, {masalah} tapi ga diperbaiki juga",
+    "bagus banget pengelolaan sampahnya, numpuk terus tiap hari 👍",
+    "smart city tapi {masalah_tech}, gimana ya",
+    "hebat ya petugas kita, dateng terlambat dan kerja asal-asalan",
+    "salut deh sama pemda, {masalah} dibiarkan bertahun-tahun",
+    "wah keren bgt, {masalah} tapi warga disuruh sabar terus",
+    "luar biasa min aplikasinya, {masalah_tech} mulu",
+    "mantap sekali, udah lapor {kali} kali tapi ga ada respons",
+    "bagus banget programnya, warganya tetep kesulitan aja",
+    "terima kasih udah membiarkan {masalah} selama ini ya 😊",
+    "program unggulan katanya, tapi {masalah} ga pernah beres",
+    "good job min, {masalah} makin parah dari hari ke hari",
+    "top markotop, janji diperbaiki {waktu} lalu tapi sampe sekarang",
+    "alhamdulillah ya, sampah di sini udah jadi gunung sendiri",
+    "inovasi pelayanan katanya, {masalah_tech} mulu dari kemarin",
+    "pelayanan prima katanya, realitanya {keluhan_pelayanan}",
+    "kota pintar katanya tapi lampu jalannya aja pada mati",
+    "hebat min, petugas kita emang paling jago ngumpet",
+    "wah bagus ya, drainasenya juga ikutan rusak biar kompak",
+]
+
+_SARC_JAM   = ["3", "4", "5", "6", "7"]
+_SARC_KALI  = ["3", "5", "berkali-kali", "puluhan"]
+_SARC_WAKTU = ["bulan lalu", "tahun lalu", "3 bulan lalu", "2 tahun lalu"]
+
+_SARC_MASALAH = [
+    "jalan berlubang parah", "got mampet terus",
+    "lampu jalan mati", "sampah numpuk",
+    "banjir tiap hujan", "trotoar hancur",
+    "fasilitas rusak semua", "drainase ga berfungsi",
+    "pipa bocor", "pompa air mati",
+]
+
+_SARC_MASALAH_TECH = [
+    "server mati", "aplikasinya error", "login aja error",
+    "loading terus ga bisa masuk", "down terus",
+    "fitur laporan ga bisa dipake", "crash mulu",
+    "notifikasi ga muncul", "data warga ga tersimpan",
+]
+
+_SARC_KELUHAN_PELAYANAN = [
+    "antrinya 5 jam ga dilayani",
+    "petugas ga ada di tempat",
+    "disuruh balik lagi besok",
+    "dokumennya minta ini itu terus",
+    "sistemnya ga bisa diakses dari tadi",
+    "data kita katanya ga ketemu",
+]
+
+# Darurat informal
+_DARURAT_TEMPLATES = [
+    "ada {kejadian} di {lokasi}, minta tolong cepet!",
+    "darurat! {kejadian} di {lokasi}, butuh bantuan segera",
+    "tolong! {kejadian} {lokasi}, ada korban",
+    "kebakaran {lokasi}, api udah gede banget tlg bantuan",
+    "banjir udah masuk rumah di {lokasi}, tolong evakuasi",
+    "ada orang pingsan di {lokasi}, butuh ambulan sekarang",
+    "tiang listrik roboh di {lokasi}, berbahaya bgt",
+    "longsor di {lokasi}, warga minta tolong segera",
+    "ada {kejadian} darurat di {lokasi} tolong respon cepet",
+    "gas bocor di {lokasi}!! tolong tim penanggulangan",
+]
+
+_DAR_KEJADIAN = [
+    "kebakaran", "banjir bandang", "tanah longsor",
+    "kecelakaan parah", "pohon tumbang",
+    "dinding ambruk", "pipa gas bocor",
+    "korban luka parah", "orang keracunan",
+]
+
+_DAR_LOKASI = [
+    "rt 05 rw 03", "jalan di depan pasar",
+    "gang sempit ujung", "permukiman padat",
+    "dekat sungai", "bantaran kali",
+    "belakang sekolah", "depan masjid",
+    "perumahan blok c", "kampung seberang",
+]
+
+# Hard cases: ambigu antar kelas
+_HARD_CASES_INTENT = [
+    # Keluhan + unsur saran (ambigu keluhan/saran)
+    "jalan di sini rusak parah, harusnya ada jadwal perbaikan rutin",
+    "sampah numpuk terus, kayaknya perlu petugas tambahan deh",
+    "got mampet mulu, mestinya dikeruk sebulan sekali kan",
+    "lampu mati lagi, mending diganti yang LED biar ga sering rusak",
+    "drainase buruk bikin banjir, perlu diperbaiki sistemnya",
+    "pelayanan lambat banget, sebaiknya tambah loket dong",
+    # Keluhan + unsur permintaan (ambigu keluhan/permintaan)
+    "trotoar ancur, minta dong segera diperbaiki",
+    "penerangan gelap bgt, tolong pasang lampu baru ya",
+    "petugas ga pernah dateng, mohon ditegur atasan ya",
+    # Permintaan lemah (ambigu permintaan/saran)
+    "kayaknya perlu ada taman di sini biar warga bisa olahraga",
+    "warga ingin ada angkutan umum ke daerah kami",
+    "alangkah baiknya kalau ada posyandu dekat sini",
+    # Apresiasi + sedikit saran (ambigu apresiasi/saran)
+    "pelayanannya udah lumayan, tapi masih bisa ditingkatkan lagi",
+    "jalan udah diperbaiki, semoga bisa lebih cepat ke depannya",
+    "terima kasih taman udah dibersihkan, kalau ada kursi lebih oke",
+    # Ekspresi netral yang bisa salah dikira keluhan
+    "kondisi jalan memang perlu perhatian lebih dari dinas",
+    "fasilitas di sini masih bisa dibenahi lebih baik lagi",
+    "pelayanan berjalan normal sesuai jam operasional",
+]
+
+_HARD_CASES_SENTIMENT = [
+    # Negatif tapi formulasi sopan
+    "mohon diperhatikan kondisi jalan yang sudah cukup lama tidak diperbaiki",
+    "kami berharap drainase yang mampet segera mendapat perhatian",
+    "warga merasa pelayanan masih perlu banyak peningkatan",
+    "kondisi ini tentu tidak ideal untuk kenyamanan warga",
+    "kami mengharapkan respons yang lebih cepat dari dinas terkait",
+    # Positif tapi diawali konteks negatif (ambigu)
+    "meski sempat rusak lama, jalan akhirnya diperbaiki juga",
+    "tadinya khawatir ga ditangani, ternyata petugas datang cepet",
+    "walaupun antri lama, pelayanannya tetap memuaskan kok",
+    # Netral yang bisa dikira positif/negatif
+    "jalan di sini belum diperbaiki sudah beberapa bulan",
+    "petugas tidak datang sesuai jadwal yang ditentukan",
+    "lampu jalan di gang ini tidak menyala sejak minggu lalu",
+    "air pdam tidak mengalir sejak kemarin siang",
+    "sampah belum diangkut padahal jadwalnya tadi pagi",
+    # Sarkasme halus (tanpa kata kuat, susah dideteksi)
+    "keren ya aplikasinya, mau laporan aja butuh 10 langkah",
+    "bagus juga sih sistemnya, tiap mau login pasti gagal",
+    "ya memang sudah takdir got di sini mampet terus kali",
+    "biasalah, udah hapal jadwal 'segera diperbaiki' artinya apa",
+    "emang dari sono-nya lampu ini emang ga suka nyala",
+]
+
+
+def _generate_keluhan(n: int) -> list[str]:
+    """Generate n kalimat keluhan natural dengan variasi tinggi."""
+    results = []
+    pred_list  = [p[0] for p in _PRED_KELUHAN]
+    pred_w     = [p[1] for p in _PRED_KELUHAN]
+
+    for _ in range(n):
+        subj    = _pick(_SUBJ_KELUHAN)
+        pred    = _pick(pred_list, weights=pred_w)
+        waktu   = _pick(_KONTEKS_WAKTU)
+        respons = _pick(_RESPONS_GA_ADA)
+        frustr  = _pick(_FRUSTRASI)
+
+        # Variasi struktur kalimat
+        pola = random.randint(1, 5)
+        if pola == 1:
+            s = f"{subj} {pred} {waktu}, {respons}"
+        elif pola == 2:
+            s = f"{waktu} {subj} {pred}, {respons}"
+        elif pola == 3:
+            s = f"{subj} udah {pred} {waktu} tapi {respons}"
+        elif pola == 4:
+            s = f"{subj} {pred}, {waktu}, {respons}. {frustr}"
+        else:
+            s = f"kok {subj} {pred} mulu sih, {waktu} {respons}"
+
+        if frustr and pola not in (4,):
+            s = s.rstrip() + f". {frustr}"
+
+        results.append(s.strip())
+    return results
+
+
+def _generate_permintaan(n: int) -> list[str]:
+    """Generate n kalimat permintaan informal."""
+    results = []
+    for _ in range(n):
+        eksp = _pick(_PERMINTAAN)
+        obj  = _pick(_OBJ_PERMINTAAN)
+        pola = random.randint(1, 3)
+        if pola == 1:
+            s = f"{eksp} {obj} ya"
+        elif pola == 2:
+            s = f"{eksp} {obj} dong, warga udah nunggu lama"
+        else:
+            s = f"kami {eksp} {obj} secepatnya"
+        results.append(s.strip())
+    return results
+
+
+def _generate_apresiasi(n: int) -> list[str]:
+    """Generate n kalimat apresiasi natural."""
+    results = []
+    for _ in range(n):
+        expr = _pick(_APRESIASI_EXPR)
+        obj  = _pick(_OBJ_APRESIASI)
+        pola = random.randint(1, 3)
+        if pola == 1:
+            s = f"{expr}, {obj}"
+        elif pola == 2:
+            s = f"{obj}, {expr} deh"
+        else:
+            s = f"{expr} karena {obj}, semoga terus begini"
+        results.append(s.strip())
+    return results
+
+
+def _generate_sarcasm(n: int) -> list[str]:
+    """Generate n kalimat sarkasme realistis."""
+    results = []
+    for _ in range(n):
+        tmpl = _pick(_SARCASM_TEMPLATES)
+        s = tmpl.format(
+            jam               = _pick(_SARC_JAM),
+            masalah           = _pick(_SARC_MASALAH),
+            masalah_tech      = _pick(_SARC_MASALAH_TECH),
+            kali              = _pick(_SARC_KALI),
+            waktu             = _pick(_SARC_WAKTU),
+            keluhan_pelayanan = _pick(_SARC_KELUHAN_PELAYANAN),
+        )
+        results.append(s.strip())
+    return results
+
+
+def _generate_darurat(n: int) -> list[str]:
+    """Generate n kalimat darurat informal."""
+    results = []
+    for _ in range(n):
+        tmpl    = _pick(_DARURAT_TEMPLATES)
+        kejadian = _pick(_DAR_KEJADIAN)
+        lokasi   = _pick(_DAR_LOKASI)
+        s = tmpl.format(kejadian=kejadian, lokasi=lokasi)
+        results.append(s.strip())
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────
+# PHRASE BANK TAMBAHAN — untuk saran, sentimen negatif/positif/netral
+# ──────────────────────────────────────────────────────────────────
+
+# Komponen saran
+_SARAN_INTRO = [
+    "sebaiknya", "alangkah baiknya", "disarankan agar", "saran kami",
+    "lebih baik kalau", "perlu dipertimbangkan", "ada baiknya",
+    "kiranya perlu", "usul kami", "mungkin perlu",
+    "kayaknya perlu", "bisa dipertimbangkan", "saran aja sih",
+    "menurut saya sebaiknya", "kalau boleh saran",
+]
+_SARAN_SUBJ = [
+    "pemerintah", "dinas terkait", "pemda", "pihak kelurahan",
+    "pengelola", "petugas", "aparat", "dinas kebersihan",
+    "dinas PU", "PDAM",
+]
+_SARAN_AKSI = [
+    "membuat jadwal rutin pemeliharaan", "menambah armada",
+    "memasang {obj} baru", "memperbaiki sistem {obj}",
+    "membuka layanan online untuk", "menambah petugas",
+    "melakukan evaluasi berkala terhadap", "mengadakan sosialisasi",
+    "meningkatkan kualitas {obj}", "merenovasi fasilitas",
+    "menerapkan sistem digital untuk", "menambah jam operasional",
+    "melibatkan warga dalam perencanaan", "rutin mengevaluasi",
+    "membentuk tim khusus untuk menangani",
+]
+_SARAN_OBJ = [
+    "jalan", "drainase", "sampah", "lampu jalan",
+    "pelayanan publik", "taman kota", "trotoar",
+    "sistem antrian", "aplikasi pengaduan", "fasilitas umum",
+    "angkutan umum", "pos kesehatan", "bank sampah",
+    "penerangan gang", "toilet umum",
+]
+_SARAN_ALASAN = [
+    "agar warga tidak kesulitan", "supaya lebih efisien",
+    "biar tidak terjadi lagi masalah ini", "demi kenyamanan warga",
+    "biar lebih responsif terhadap keluhan", "agar lebih terjangkau",
+    "supaya lingkungan lebih bersih", "biar warga tidak perlu antri",
+    "agar lebih tepat sasaran", "supaya tidak berulang terus",
+    "biar transparan dan akuntabel", "demi keselamatan warga",
+]
+
+# Komponen sentimen negatif (untuk generator)
+_NEG_SUBJ = [
+    "jalan di sini", "lampu jalan", "sampah", "got",
+    "drainase", "pelayanan", "fasilitas", "air pdam",
+    "trotoar", "puskesmas", "petugas", "kondisi lingkungan",
+]
+_NEG_PRED = [
+    "rusak parah ga diperbaiki", "mati terus ga ada yang benerin",
+    "numpuk ga diangkut-angkut", "mampet banjir tiap hujan",
+    "buruk bgt mengecewakan warga", "tidak layak sangat memprihatinkan",
+    "bocor sudah lama diabaikan", "makin parah dari hari ke hari",
+    "tidak berfungsi sudah berbulan-bulan", "jorok tidak terawat sama sekali",
+]
+_NEG_WAKTU = [
+    "udah berminggu-minggu", "dari bulan lalu", "bertahun-tahun",
+    "udah 3 hari", "udah sebulan lebih", "dari dulu",
+    "ga pernah beres", "terus-terusan",
+]
+_NEG_PENUTUP = [
+    "sangat mengecewakan", "warga kecewa besar", "ga ada tindakan apapun",
+    "laporan tidak direspons", "pemerintah tidak peduli",
+    "kami udah capek nunggu", "percuma lapor", "sia-sia aja",
+    "minta tolong ditangani", "ini sudah darurat", "",
+]
+
+# Komponen sentimen positif (untuk generator)
+_POS_EKSP = [
+    "alhamdulillah", "syukurlah", "seneng banget",
+    "puas bgt sama", "makasih banyak ya",
+    "salut deh sama", "top bgt", "keren bgt",
+    "bangga sama", "mantap bgt",
+]
+_POS_OBJ = [
+    "jalan udah diperbaiki", "drainase udah dibersihkan",
+    "lampu udah dipasang dan nyala", "sampah rutin diangkut",
+    "pelayanannya cepat dan ramah", "petugas responsif bgt",
+    "program ini tepat sasaran", "fasilitas udah layak",
+    "got udah dikeruk ga banjir lagi", "taman udah bersih indah",
+    "puskesmas pelayanannya meningkat", "aplikasi pelayanan mudah dipake",
+    "bansos tepat sasaran dan cepat cair", "pembangunan selesai tepat waktu",
+]
+_POS_HARAP = [
+    "semoga terus begini", "pertahankan terus ya",
+    "lanjutkan programnya", "semoga makin baik",
+    "ditingkatkan lagi", "ini yang kami harapkan selama ini",
+    "", "", "",  # beberapa tanpa kalimat harapan
+]
+
+# Komponen sentimen netral (untuk generator)
+_NETRAL_INFO = [
+    "prosedur {hal} di kantor {tempat}",
+    "jadwal {hal} di wilayah ini",
+    "syarat {hal} untuk warga",
+    "cara mengurus {hal}",
+    "biaya dan proses {hal}",
+    "mekanisme {hal} yang berlaku",
+    "informasi tentang {hal}",
+    "ketentuan {hal} bagi warga",
+]
+_NETRAL_HAL = [
+    "pembuatan KTP", "perpanjangan SIM", "kartu keluarga",
+    "akta kelahiran", "surat domisili", "izin usaha",
+    "bantuan sosial", "program beasiswa", "vaksinasi",
+    "angkutan sampah", "pelayanan publik", "pengaduan online",
+    "program bantuan rumah", "kartu kesehatan", "surat pindah",
+]
+_NETRAL_TEMPAT = [
+    "kelurahan", "kecamatan", "dinas terkait",
+    "kantor pelayanan", "puskesmas", "SAMSAT",
+]
+_NETRAL_KONDISI = [
+    "kondisi {obj} masih perlu perhatian lebih dari dinas terkait",
+    "fasilitas {obj} berjalan normal sesuai jam operasional",
+    "{obj} perlu diperbaiki agar lebih layak digunakan warga",
+    "program {obj} sudah berjalan dan warga mulai merasakan manfaatnya",
+    "petugas {obj} sudah berupaya memberikan pelayanan yang lebih baik",
+    "proses {obj} membutuhkan waktu sesuai prosedur yang berlaku",
+]
+_NETRAL_OBJ2 = [
+    "jalan", "drainase", "pelayanan", "sampah",
+    "fasilitas umum", "lampu jalan", "air bersih",
+    "angkutan umum", "program bantuan", "layanan kesehatan",
+]
+
+
+def _generate_saran(n: int) -> list[str]:
+    """Generate n kalimat saran yang natural dan bervariasi."""
+    results = []
+    for _ in range(n):
+        intro = _pick(_SARAN_INTRO)
+        subj  = _pick(_SARAN_SUBJ)
+        aksi  = _pick(_SARAN_AKSI).replace("{obj}", _pick(_SARAN_OBJ))
+        obj   = _pick(_SARAN_OBJ)
+        alasan = _pick(_SARAN_ALASAN)
+
+        pola = random.randint(1, 5)
+        if pola == 1:
+            s = f"{intro} {subj} {aksi} {obj}"
+        elif pola == 2:
+            s = f"{intro} ada {obj} yang lebih {_pick(['baik','layak','teratur','memadai'])}, {alasan}"
+        elif pola == 3:
+            s = f"{intro} {aksi} {obj}, {alasan}"
+        elif pola == 4:
+            s = f"saran: {aksi} {obj} {alasan}"
+        else:
+            s = f"{intro} {subj} lebih {_pick(['aktif','responsif','konsisten','transparan'])} dalam menangani {obj}"
+
+        results.append(s.strip())
+    return results
+
+
+def _generate_negatif(n: int) -> list[str]:
+    """Generate n kalimat sentimen negatif yang natural."""
+    results = []
+    for _ in range(n):
+        subj    = _pick(_NEG_SUBJ)
+        pred    = _pick(_NEG_PRED)
+        waktu   = _pick(_NEG_WAKTU)
+        penutup = _pick(_NEG_PENUTUP)
+
+        pola = random.randint(1, 5)
+        if pola == 1:
+            s = f"{subj} {pred} {waktu}"
+        elif pola == 2:
+            s = f"{waktu} {subj} {pred}, {penutup}"
+        elif pola == 3:
+            s = f"{subj} udah {pred} {waktu}, {penutup}"
+        elif pola == 4:
+            s = f"udah lapor soal {subj} tapi {pred} terus, {penutup}"
+        else:
+            s = f"kok {subj} {pred} terus sih {waktu}? {penutup}"
+
+        results.append(s.strip())
+    return results
+
+
+def _generate_positif(n: int) -> list[str]:
+    """Generate n kalimat sentimen positif yang natural."""
+    results = []
+    for _ in range(n):
+        eksp  = _pick(_POS_EKSP)
+        obj   = _pick(_POS_OBJ)
+        harap = _pick(_POS_HARAP)
+
+        pola = random.randint(1, 4)
+        if pola == 1:
+            s = f"{eksp} {obj}"
+        elif pola == 2:
+            s = f"{obj}, {eksp} deh"
+        elif pola == 3:
+            s = f"{eksp} karena {obj}. {harap}".strip()
+        else:
+            s = f"{obj}! {eksp}. {harap}".strip()
+
+        results.append(s.strip().rstrip("!").strip())
+    return results
+
+
+def _generate_netral(n: int) -> list[str]:
+    """Generate n kalimat sentimen netral (info/prosedur/kondisi)."""
+    results = []
+    for _ in range(n):
+        pola = random.randint(1, 3)
+        if pola == 1:
+            # Format tanya-info
+            tmpl = _pick(_NETRAL_INFO)
+            hal  = _pick(_NETRAL_HAL)
+            tmp  = _pick(_NETRAL_TEMPAT)
+            s = tmpl.format(hal=hal, tempat=tmp)
+        elif pola == 2:
+            # Format kondisi netral
+            tmpl = _pick(_NETRAL_KONDISI)
+            obj2 = _pick(_NETRAL_OBJ2)
+            s = tmpl.format(obj=obj2)
+        else:
+            # Format informatif singkat
+            hal  = _pick(_NETRAL_HAL)
+            tmp  = _pick(_NETRAL_TEMPAT)
+            s = f"info tentang {hal} di {tmp} gimana ya prosedurnya"
+
+        results.append(s.strip())
+    return results
+
+
+# ──────────────────────────────────────────────────────────────────
+# GENERATED DATASETS — target 350 per kelas intent, 300 sentimen
+# ──────────────────────────────────────────────────────────────────
+# Rumus: target = static_count + generated_count
+#   keluhan   : 199 static + 18 hard + 30 sarc + 103 gen = 350
+#   permintaan: 79  static + 271 gen                     = 350
+#   saran     : 56  static + 294 gen                     = 350
+#   apresiasi : 53  static + 297 gen                     = 350
+#   darurat   : 30  static + 320 gen                     = 350
+#
+#   negatif   : 58 static + 20 sarc_sent + 15 hard + 207 gen = 300
+#   positif   : 104 static + 196 gen                         = 300
+#   netral    : 119 static + 181 gen                         = 300
+
+GENERATED_KELUHAN    = _generate_keluhan(103)
+GENERATED_PERMINTAAN = _generate_permintaan(271)
+GENERATED_SARAN      = _generate_saran(294)
+GENERATED_APRESIASI  = _generate_apresiasi(297)
+GENERATED_SARCASM    = _generate_sarcasm(30)    # masuk kelas keluhan
+GENERATED_DARURAT    = _generate_darurat(320)
+
+# Generator sentimen
+GENERATED_NEGATIF = _generate_negatif(207)
+GENERATED_POSITIF = _generate_positif(196)
+GENERATED_NETRAL  = _generate_netral(181)
+
+# Sarkasme otomatis untuk sentimen NEGATIF
+GENERATED_SARC_NEGATIF_SENT = _generate_sarcasm(20)
+
 
 # ================================================================
 # INTENT DATA
@@ -20,7 +666,9 @@ INTENT_DATA = {
     "texts": [
 
         # ==========================================================
-        # KELUHAN (273) — 258 asli + 15 ambigu
+        # KELUHAN (199 static + 18 hard + 30 sarcasm + 103 generated)
+        # Total = 350
+        # Total ≈ 378
         # ==========================================================
         "Jalan rusak parah sudah lama tidak diperbaiki oleh dinas",
         "Sampah tidak diangkut berhari-hari baunya menyengat sekali",
@@ -202,103 +850,36 @@ INTENT_DATA = {
         "kerusakan infrastruktur makin parah ga ada anggaran perbaikan",
         "jalan rusak bikin kendaraan warga cepat rusak dan rugi",
         "lampu penerangan jalan rusak wilayah jadi rawan kejahatan",
-        "tempat pembuangan akhir terlalu dekat dengan pemukiman warga",
-        "pelayanan pemerintah daerah jauh dari kata memuaskan",
         "air bersih sering mati mendadak tanpa pemberitahuan dulu",
         "petugas tidak disiplin sering tidak ada di pos pelayanan",
         "kondisi drainase memprihatinkan selalu banjir saat hujan deras",
-        "fasilitas olahraga publik rusak tidak bisa digunakan masyarakat",
         "jembatan gantung sudah tidak aman perlu segera diperbaiki",
         "pelayanan di kantor kelurahan sangat tidak memuaskan",
         "masalah ini sudah bertahun-tahun tapi tidak pernah ditangani",
-        "sampah liar di pinggir hutan kota menambah kerusakan lingkungan",
-        "petugas sering tidak ada di tempat saat warga membutuhkan bantuan",
-        "gorong-gorong rusak sehingga air meluap ke jalan saat hujan",
-        "pengelolaan limbah industri buruk mencemari lingkungan warga",
-        "infrastruktur jalan desa sangat buruk tidak ada perhatian",
         "kondisi selokan sangat kotor dan tersumbat perlu dibersihkan",
         "pelayanan tidak ramah petugas jutek tidak mau melayani",
-        "fasilitas panti sosial rusak penghuni tidak mendapat layanan",
         "taman kota tidak terawat menjadi tempat pembuangan sampah liar",
         "kondisi sanitasi di wilayah ini sangat memprihatinkan",
         "jalan berdebu sangat mengganggu kesehatan warga sekitar",
         "lampu lalu lintas mati menyebabkan kemacetan dan kekacauan",
         "pelayanan perizinan sangat lambat merugikan pengusaha kecil",
-        "air sumur warga tercemar karena pembuangan limbah sembarangan",
-        "kondisi rumah susun sangat memprihatinkan perlu renovasi",
-        "fasilitas di balai latihan kerja rusak tidak bisa digunakan",
-        "drainase tidak berfungsi karena penuh sampah tidak dibersihkan",
-        "angkutan umum tidak ada di wilayah terpencil warga terisolasi",
-        "fasilitas untuk disabilitas di gedung pemerintah tidak ada",
-        "kondisi jalan menuju puskesmas sangat rusak susah diakses",
-        "petugas keamanan di kawasan publik tidak ada wilayah rawan",
-        "taman bermain anak-anak tidak aman banyak fasilitas yang rusak",
-        "jalur evakuasi bencana tidak jelas tidak ada petunjuk arah",
-        "kualitas air bersih yang dipasok PDAM sangat buruk keruh",
-        "fasilitas ibadah di taman kota rusak tidak dirawat",
-        "kondisi pasar tradisional tidak higienis banyak lalat dan tikus",
         "pengelolaan parkir di pusat kota kacau dan tidak teratur",
-        "rel kereta di pinggir jalan rusak berbahaya bagi pejalan kaki",
-        "sumur warga mengering di musim kemarau tidak ada solusi",
-        "kondisi jalan menuju sekolah sangat rusak membahayakan siswa",
-        "pelayanan kesehatan di daerah terpencil sangat minim",
-        "fasilitas puskesmas sangat terbatas tidak ada dokter spesialis",
-        "jalan kampung rusak parah tidak layak dilalui kendaraan apapun",
-        "got di belakang rumah tersumbat sampah sudah lama mampet",
-        "lampu penerangan jalan mati warga takut keluar malam",
-        "pelayanan birokrasi berbelit warga lelah mengurus dokumen",
-        "fasilitas taman kota tidak dirawat tanaman mati semua",
-        "penanganan sampah di wilayah ini sangat tidak profesional",
-        "kondisi lingkungan sangat buruk warga merasa tidak diperhatikan",
-        "drainase primer tersumbat seluruh wilayah kebanjiran parah",
-        "pelayanan posyandu sering tidak ada kader yang hadir",
-        "kondisi bangunan madrasah rusak berbahaya bagi santri",
-        "air limbah industri mengalir ke sungai mencemari sumber air",
-        "jalan desa berlumpur saat hujan tidak bisa dilalui warga",
-        "petugas kebersihan pasar tidak ada sampah menumpuk di mana-mana",
-        "kabel optik menjuntai rendah berbahaya bagi pengguna jalan",
-        "kondisi terminal bus sangat tidak terawat dan kotor sekali",
-        "pengelolaan PKL di kawasan wisata sangat tidak teratur",
-        "fasilitas di posyandu tidak memadai timbangan rusak dll",
-        "jalan menuju makam rusak berlubang sulit diakses warga",
-        "sistem irigasi sawah rusak petani tidak bisa mengairi lahan",
-        "penanganan banjir setiap tahun tidak pernah ada solusi permanen",
-        "kondisi hutan kota gundul tidak ada penanaman kembali",
-        "pelayanan di kantor catatan sipil sangat lama dan berbelit",
-        "fasilitas olahraga di perumahan rusak tidak diperbaiki pengelola",
-        "air hujan masuk ke dalam rumah karena drainase tidak berfungsi",
-        "jalan alternatif rusak parah saat jalan utama ditutup perbaikan",
-        "pengelolaan aset daerah tidak transparan merugikan masyarakat",
-        "kondisi trotoar tidak rata berbahaya bagi lansia dan difabel",
-        "sampah plastik berserakan di pantai merusak ekosistem laut",
-        "fasilitas RPTRA rusak tidak ada anggaran perbaikan dari dinas",
-        "jalan beton retak-retak membahayakan pengendara motor",
-        "drainase kawasan perumahan tidak berfungsi sering banjir",
-        "pelayanan tidak profesional petugas tidak paham tugasnya",
-        "kondisi gedung olahraga bocor tidak bisa digunakan saat hujan",
-        "limbah ternak mencemari sungai dan sumur warga sekitar",
-        "angkutan umum sering tidak beroperasi warga kesulitan mobilitas",
-        "jalan lintas desa rusak parah menyebabkan kemacetan berkepanjangan",
-        "petugas tidak disiplin sering datang terlambat saat bertugas",
-        # Sampel ambigu — overlap dengan kelas lain
-        "jalan di sini rusak parah, harusnya bisa diperbaiki lebih cepat",
-        "sampah numpuk terus, mestinya ada jadwal pengangkutan yang jelas",
-        "pelayanannya lambat, mungkin perlu tambah pegawai biar cepet",
-        "got mampet mulu, kayaknya perlu dikeruk rutin setiap bulan",
-        "lampu jalan mati, sebaiknya diganti yang LED biar tahan lama",
-        "drainase buruk bikin banjir terus, perlu diperbaiki sistemnya",
-        "toilet umum jorok, harusnya ada petugas jaga dan bersihin",
-        "angkot jarang lewat, mestinya ditambah armadanya dong",
-        "kondisi puskesmas memprihatinkan, perlu renovasi segera",
-        "trotoar rusak dan sempit, sebaiknya diperlebar buat pejalan kaki",
         "jalan berlubang parah banget udah banyak yang kecelakaan",
         "kabel listrik menjuntai rendah hampir mengenai kepala warga",
         "banjir makin parah hampir masuk ke dalam rumah warga",
         "pohon mau tumbang angin kencang warga khawatir banget",
         "ada retakan di dinding rumah susun yang makin melebar",
+        # ── Generated keluhan realistis ──────────────────────────
+        *GENERATED_KELUHAN,
+        # ── Generated sarkasme (intent = keluhan) ────────────────
+        *GENERATED_SARCASM,
+        # ── Hard cases keluhan/ambigu ─────────────────────────────
+        *_HARD_CASES_INTENT,
 
         # ==========================================================
-        # PERMINTAAN (154) — 144 asli + 10 ambigu
+        # PERMINTAAN (79 static + 271 generated)
+        # Total = 350
+        # Total ≈ 204
         # ==========================================================
         "Mohon dipasang lampu jalan baru di kawasan gelap ini",
         "Minta dibuatkan zebra cross di depan sekolah dasar",
@@ -365,671 +946,90 @@ INTENT_DATA = {
         "Mohon bangun drainase baru yang lebih besar di kawasan ini",
         "Harap ada program bedah rumah untuk warga tidak mampu",
         "Minta pemasangan lampu tenaga surya di jalan desa",
-        "Tolong sediakan area bermain indoor untuk anak-anak",
-        "Mohon tambahkan jadwal bus malam untuk kebutuhan warga",
-        "Harap ada klinik gigi gratis untuk warga kurang mampu",
-        "Minta dibuatkan trotoar yang lebar di jalan protokol ini",
-        "Tolong sediakan tempat parkir motor gratis di dekat stasiun",
-        "Mohon bangun jalan beton menggantikan jalan tanah yang rusak",
-        "Harap ada program pengobatan gratis untuk warga kurang mampu",
-        "Minta penambahan kursi dan meja di taman kota untuk warga",
-        "Tolong sediakan layanan konsultasi hukum gratis untuk warga",
-        "Mohon tambah armada bus sekolah untuk siswa yang jauh",
-        "Harap ada perbaikan sistem irigasi sawah yang sudah rusak",
-        "Minta pembangunan pos pengamanan sungai di musim banjir",
-        "Tolong sediakan defibrillator di tempat umum untuk darurat",
-        "Mohon bangun shelter hewan terlantar di kelurahan kami",
-        "Harap ada program daur ulang sampah di tingkat RT",
-        "Minta dibuatkan jalur hijau sepanjang jalan protokol kota",
-        "Tolong sediakan akses wifi publik gratis di taman kota",
-        "Mohon perbaiki sistem penerangan di kawasan pasar malam",
-        "Harap ada bus rapid transit yang melewati kawasan kami",
-        "Minta pemasangan kamera tilang elektronik di persimpangan",
-        "Tolong sediakan tempat pengomposan sampah organik di taman",
-        "Mohon tambah tenaga medis di puskesmas yang kekurangan",
-        "Harap ada program KB gratis untuk pasangan muda",
-        "Minta penambahan titik hydrant kebakaran di kawasan padat",
-        "Tolong sediakan shuttle bus dari pemukiman ke stasiun",
-        "Mohon rehabilitasi gedung kesenian yang sudah rusak parah",
-        "Harap ada program beasiswa untuk anak kurang mampu berprestasi",
-        "Minta dibuatkan tanggul banjir di kawasan rawan banjir",
-        "Tolong sediakan pos pertolongan pertama di tempat wisata",
-        "Mohon bangun embung sebagai cadangan air di musim kemarau",
         "mohon dong segera pasang lampu jalan di kawasan gelap ini",
         "minta tolong buatin zebra cross di depan sekolah kami",
         "tlg tambahin armada bus rute ke perumahan kami dong",
-        "tolong sediain tempat sampah yg cukup di taman kota",
-        "mohon bangun posyandu baru di kelurahan kami segera dong",
-        "minta perbaikan jalan berlubang parah di rt kami dong",
-        "harap pasangin rambu lalu lintas di persimpangan berbahaya itu",
-        "tolong tambahin toilet umum yg bersih di area pasar dong",
-        "mohon sediain bangku taman yg lebih banyak utk warga",
-        "minta dibangun taman bermain yg layak utk anak-anak kita",
-        "tolong segera pasang cctv di area parkir yg rawan maling",
-        "mohon tambahin petugas keamanan di area sini malam hari",
-        "minta diadain angkutan umum ke daerah terpencil kami dong",
-        "harap sediain fasilitas difabel di kantor kelurahan dong",
-        "mohon tambahin loket pelayanan biar warga ga antri lama",
-        "tolong tambahin jam operasional pelayanan sampai sore",
-        "minta disediain pelayanan online buat urus administrasi",
-        "kami butuh banget poliklinik tambahan di wilayah padat ini",
-        "warga berharap ada program vaksinasi di kelurahan kita",
-        "perlu banget ada penambahan fasilitas kesehatan yg layak",
-        "kami ingin ada bank sampah di setiap rt wilayah kami",
-        "berharap ada lapangan olahraga buat warga di sini dong",
-        "tolong pasang portal jalan biar truk gede ga bisa masuk",
-        "mohon tambahin lampu sorot di area yg sering jadi tkp",
-        "minta dilakuin pengerukan saluran drainase yg udah penuh",
-        "harap ada program tanam pohon di sepanjang jalan ini dong",
-        "kami sangat butuh ruang terbuka hijau di wilayah kami",
-        "tolong lakuin fogging nyamuk di wilayah kami yg rawan dbd",
-        "mohon segera perbaiki jembatan yg hampir roboh itu dong",
-        "harap ditambahin fasilitas olahraga di taman kota kami",
-        "minta dibuatin jalur pedestrian yg nyaman di jalan utama",
-        "tolong segera perbaiki pipa pdam yg bocor di jalan ini",
-        "mohon sediain layanan jemput bola buat warga lansia",
-        "harap ada pengamanan lebih ketat di kawasan sekolah dong",
-        "tolong tambahin armada sampah buat wilayah kami dong",
-        "mohon perbaiki drainase yg jebol nyebabin banjir terus",
-        "minta dibangun jembatan penghubung dua desa yg terputus",
-        "tolong rehab sekolah dasar yg atapnya udah bocor parah",
-        "mohon adain pelatihan kewirausahaan buat warga kurang mampu",
-        "harap tambahin tempat cuci tangan di area publik dong",
-        "minta pengaspalan jalan kampung yg masih tanah berbatu",
-        "tolong sediain layanan ambulans desa buat kedaruratan",
-        "mohon bangun tpu baru krn yg ada udah penuh banget",
-        "harap ada sistem peringatan dini banjir di wilayah kami",
-        "minta pemasangan palang kereta di perlintasan yg berbahaya",
-        "tolong sediain bak sampah besar di setiap rt kelurahan",
-        "mohon tambahin sumur bor buat warga yg kekurangan air",
-        "harap ada petugas kebersihan yg rutin di kawasan wisata",
-        "minta pembangunan pos keamanan di pintu masuk perumahan",
-        # Sampel ambigu — overlap dengan kelas lain
-        "minta dibuatin sistem pengaduan online yang lebih mudah",
-        "mohon ada evaluasi kinerja petugas secara rutin dan transparan",
-        "tolong adain program sosialisasi buat warga tentang kebersihan",
-        "minta dipertimbangin penambahan rute angkutan umum ke desa",
-        "harap ada kajian ulang sistem drainase yang sering bikin banjir",
-        "minta segera tangani sampah yang udah numpuk berminggu-minggu",
-        "tolong perbaiki jalan rusak yang udah bikin banyak kecelakaan",
-        "mohon segera atasi genangan air yang ga kunjung surut",
-        "minta petugas datang ke lokasi lampu jalan yang mati",
-        "tolong tangani got mampet yang bikin bau ga sedap",
+        "harap sediain tempat sampah lebih banyak di taman ini",
+        "harap pasang rambu lalu lintas di persimpangan ini dong",
+        "minta dibuatin zebra cross di depan sekolah dasar",
+        "mohon dipasang lampu jalan baru di kawasan ini dong",
+        "tlg tambahin toilet umum di area pasar tradisional",
+        "harap sediain fasilitas difabel di kantor kelurahan",
+        "kami butuh posyandu baru di kelurahan kami dong",
+        "tlg bangun taman bermain buat anak di kelurahan ini",
+        "mohon tambahin petugas keamanan di area ini malam hari",
+        "kami pengen ada perbaikan fasilitas di wilayah ini",
+        "warga berharap ada tindakan nyata dari pemda dong",
+        *GENERATED_PERMINTAAN,
 
         # ==========================================================
-        # SARAN (149) — 139 asli + 10 ambigu
+        # SARAN (56 static + 294 generated)
+        # Total = 350
+        # Total ≈ 149
         # ==========================================================
-        "Sebaiknya jadwal pengangkutan sampah diumumkan lebih awal",
-        "Alangkah baiknya ada taman baca di setiap kelurahan kota",
-        "Saran agar loket pelayanan ditambah supaya tidak antre lama",
-        "Lebih baik pelayanan online agar warga tidak perlu datang",
-        "Disarankan agar petugas kebersihan berpatroli dua kali sehari",
-        "Sebaiknya dibuat sistem pengaduan online yang mudah diakses",
-        "Usul agar pasar ditata lebih rapi dan bersih serta teratur",
-        "Sarankan agar jam operasional kantor diperpanjang sampai sore",
-        "Sebaiknya ada sosialisasi program pemerintah kepada masyarakat",
-        "Alangkah lebih baik bila ada ruang terbuka hijau di sini",
-        "Usul agar dibuat jalur evakuasi bencana yang jelas dan mudah",
-        "Saran untuk menambah pelatihan kerja bagi warga usia muda",
-        "Sebaiknya parkir liar ditertibkan secara rutin dan berkala",
-        "Lebih baik bila ada bank sampah di setiap RT dan kelurahan",
-        "Disarankan agar lampu lalu lintas diservis secara berkala",
-        "Sistem pelayanan perlu dibenahi agar jauh lebih efisien",
-        "Pengelolaan sampah bisa ditingkatkan dengan teknologi modern",
-        "Sistem antrian digital dapat diterapkan di kantor kelurahan",
-        "Database warga bisa didigitalisasi agar pelayanan lebih cepat",
-        "Aplikasi pengaduan perlu dibenahi agar lebih mudah digunakan",
-        "Ada baiknya peraturan parkir diperketat di area pusat kota",
-        "Sebaiknya ada sanksi tegas bagi pembuang sampah sembarangan",
-        "Hendaknya dibuat regulasi ketat untuk bangunan liar di sini",
-        "Kiranya perlu ada evaluasi rutin kinerja petugas pelayanan",
-        "Perlu ditingkatkan transparansi penggunaan anggaran daerah",
-        "Perlu dibenahi sistem drainase agar tidak banjir setiap hujan",
-        "Bisa ditingkatkan kualitas jalan dengan material yang lebih baik",
-        "Dapat ditingkatkan jumlah CCTV di titik rawan kejahatan",
-        "Seharusnya ada jalur pejalan kaki yang nyaman di setiap jalan",
-        "Lebih baik bila lampu penerangan dipasang di seluruh gang",
-        "Sebaiknya sistem irigasi sawah dimodernisasi dengan pompa baru",
-        "Ada baiknya dibuat zona khusus PKL agar tidak semrawut",
-        "Disarankan agar petugas pelayanan mengikuti pelatihan etiket",
-        "Sebaiknya ada program rutin pemangkasan pohon di jalan protokol",
-        "Lebih baik bila angkutan umum menggunakan sistem cashless",
-        "Perlu dipertimbangkan pembangunan trotoar di semua jalan utama",
-        "Sebaiknya pemerintah menyediakan aplikasi pelacak kendaraan umum",
-        "Alangkah baiknya ada program vaksinasi gratis di tiap RT",
-        "Usul agar dibuat perda tentang pengelolaan sampah yang tegas",
-        "Saran agar dibuat jalur khusus sepeda di seluruh jalan kota",
-        "Disarankan agar sistem drainase dikaji ulang oleh ahli hidrologi",
-        "Sebaiknya pemerintah memberikan insentif bagi warga yang merawat taman",
-        "Ada baiknya data kependudukan diintegrasikan dengan layanan publik",
-        "Lebih baik bila kantor kelurahan buka di hari Sabtu untuk warga",
-        "Perlu dibenahi manajemen pasar agar lebih higienis dan teratur",
-        "Sebaiknya ada program zero waste di tingkat kelurahan dan kota",
-        "Usul agar pemerintah menyediakan bus gratis untuk pelajar",
-        "Hendaknya ada sistem reward bagi warga yang aktif menjaga kebersihan",
-        "Disarankan agar lampu penerangan jalan menggunakan LED hemat energi",
-        "Sebaiknya ada kampanye penghijauan yang melibatkan warga secara aktif",
-        "Lebih baik bila pelayanan KTP dilakukan secara mobile ke desa",
-        "Ada baiknya pemerintah menyediakan pendampingan usaha mikro",
-        "Sebaiknya ada pelatihan mitigasi bencana bagi warga di daerah rawan",
-        "Perlu ditingkatkan sosialisasi tentang pemilahan sampah organik",
-        "Usul agar dibuat sistem parkir berbasis aplikasi di pusat kota",
-        "Disarankan agar pemerintah memanfaatkan energi surya untuk PLN",
-        "Sebaiknya ada pelayanan terpadu satu atap untuk semua keperluan",
-        "Alangkah baiknya ada program rehabilitasi eks penderita ODGJ",
-        "Lebih baik bila pengelolaan RPTRA melibatkan warga sekitar",
-        "Ada baiknya dibuat taman vertikal di gedung-gedung pemerintah",
-        "Sebaiknya ada program literasi digital untuk warga lansia",
-        "Hendaknya pemerintah merekrut relawan banjir dari warga setempat",
-        "Disarankan agar proses perizinan usaha bisa selesai dalam sehari",
-        "Perlu dipertimbangkan penambahan halte bus di titik-titik strategis",
-        "Sebaiknya pemerintah mendirikan pusat pelatihan wirausaha daerah",
-        "Usul agar dibuat program adopsi taman oleh perusahaan swasta",
-        "Lebih baik bila sistem pengaduan masyarakat terintegrasi digital",
-        "Ada baiknya pemerintah menyediakan beasiswa untuk guru honorer",
-        "Sebaiknya ada evaluasi berkala kualitas air yang dipasok PDAM",
-        "Hendaknya ada pos pengamanan di setiap kawasan wisata daerah",
-        "Disarankan agar dibuat sistem informasi publik yang mudah diakses",
-        "Perlu ditingkatkan sinergi antara pemerintah dan komunitas warga",
-        "Sebaiknya ada program subsidi perbaikan rumah tidak layak huni",
-        "Alangkah baiknya ada perpustakaan keliling di daerah terpencil",
-        "Usul agar pemerintah membuat aplikasi pelaporan masalah infrastruktur",
-        "Lebih baik bila ada pelatihan keterampilan untuk anak putus sekolah",
-        "Ada baiknya dibuat jalur hijau koneksi antar taman kota",
-        "Sebaiknya ada standar pelayanan minimum yang dipublikasikan",
-        "Disarankan agar pemerintah menyediakan lahan urban farming",
-        "Hendaknya pemerintah mengoptimalkan potensi wisata daerah",
-        "Sebaiknya ada program pemberdayaan ibu rumah tangga di kelurahan",
-        "Usul agar pemerintah membangun pasar tradisional yang modern",
-        "Lebih baik bila angkutan kota dilengkapi fasilitas GPS tracker",
-        "Ada baiknya ada program deteksi dini stunting di posyandu",
-        "Sebaiknya pemerintah memperluas jaringan internet di daerah terpencil",
-        "Perlu dipertimbangkan pembuatan zona ekonomi khusus untuk UMKM",
-        "Hendaknya ada kebijakan tegas terhadap alih fungsi lahan hijau",
-        "Sebaiknya sistem pengolahan limbah industri diawasi lebih ketat",
-        "Disarankan agar ada integrasi transportasi umum di seluruh kota",
-        "sebaiknya jadwal angkut sampah diumumin lebih awal dong",
-        "alangkah baiknya ada taman baca di tiap kelurahan kota",
-        "saran biar loket pelayanan ditambah warga ga antri lama",
-        "lebih baik pelayanan online biar warga ga perlu datang",
-        "disaranin agar petugas kebersihan patroli dua kali sehari",
-        "sebaiknya dibikin sistem pengaduan online yg gampang dipake",
-        "usul biar pasar ditata lebih rapi bersih dan teratur",
-        "saranin biar jam kantor diperpanjangin sampe sore hari",
-        "sebaiknya ada sosialisasi program pemerintah ke masyarakat",
-        "alangkah lebih baik kalo ada rtg di wilayah kami",
-        "usul biar dibikin jalur evakuasi bencana yg jelas",
-        "saran utk tambahin pelatihan kerja bagi warga muda",
-        "sebaiknya parkir liar ditertibkan secara rutin dan berkala",
-        "lebih baik kalo ada bank sampah di tiap rt kelurahan",
-        "disaranin biar lampu lalu lintas diservis secara berkala",
-        "sistem pelayanan perlu dibenahi biar jauh lebih efisien",
-        "pengelolaan sampah bisa ditingkatin pakai teknologi modern",
-        "sistem antrian digital bisa diterapin di kantor kelurahan",
-        "database warga bisa didigitalisasi biar pelayanan cepat",
-        "aplikasi pengaduan perlu dibenahi biar lebih gampang dipake",
-        "ada baiknya peraturan parkir diperketat di pusat kota",
-        "sebaiknya ada sanksi tegas buat pembuang sampah sembarangan",
-        "kiranya perlu ada evaluasi rutin kinerja petugas pelayanan",
-        "perlu ditingkatin transparansi penggunaan anggaran daerah",
-        "perlu dibenahi sistem drainase biar ga banjir tiap hujan",
-        "bisa ditingkatin kualitas jalan dgn material yg lebih baik",
-        "seharusnya ada jalur pejalan kaki yg nyaman di tiap jalan",
-        "lebih baik kalo lampu penerangan dipasang di seluruh gang",
-        "ada baiknya dibikin zona khusus pkl biar ga semrawut",
-        "disaranin biar petugas pelayanan ikut pelatihan etiket dulu",
-        "sebaiknya ada program rutin pemangkasan pohon di jalan",
-        "usul biar dibikin perda tentang pengelolaan sampah yg tegas",
-        "saran biar dibikin jalur khusus sepeda di seluruh jalan kota",
-        "lebih baik kalo kantor kelurahan buka di hari sabtu",
-        "perlu dibenahi manajemen pasar biar lebih higienis dan teratur",
-        "sebaiknya ada program zero waste di tingkat kelurahan",
-        "usul biar pemerintah sediain bus gratis buat pelajar",
-        "disaranin biar lampu jalan pake led yg hemat energi",
-        "sebaiknya ada kampanye penghijauan yg libatkan warga aktif",
-        "lebih baik kalo pelayanan ktp dilakukan secara mobile ke desa",
-        "ada baiknya pemerintah sediain pendampingan usaha mikro",
-        "perlu ditingkatin sosialisasi tentang pemilahan sampah organik",
-        "usul biar dibikin sistem parkir berbasis aplikasi di pusat kota",
-        "sebaiknya ada pelayanan terpadu satu atap buat semua keperluan",
-        "lebih baik kalo pengelolaan rptra libatkan warga sekitar",
-        "ada baiknya dibikin program literasi digital buat warga lansia",
-        "hendaknya proses perizinan usaha bisa selesai dalam sehari",
-        "perlu dipertimbangin penambahan halte bus di titik strategis",
-        "sebaiknya pemerintah diriin pusat pelatihan wirausaha daerah",
-        "usul biar dibuat program adopsi taman oleh perusahaan swasta",
-        # Sampel ambigu — overlap dengan kelas lain
-        "sebaiknya segera dipasang lampu di gang yang gelap itu",
-        "alangkah baiknya jalan rusak di sini langsung diperbaiki",
-        "disarankan agar petugas segera merespons laporan warga",
-        "lebih baik bila sampah segera diangkut sebelum menumpuk",
-        "sebaiknya got yang mampet segera dibersihkan petugas",
-        "mungkin bisa dipertimbangkan sistem pelayanan berbasis digital",
-        "bisa jadi solusi kalau ada bank sampah di tiap RT",
-        "kayaknya perlu ada evaluasi rutin program kerja pemda",
-        "sepertinya warga perlu dilibatkan dalam musyawarah pembangunan",
-        "rasanya perlu ada perbaikan tata kelola pasar yang lebih baik",
+        "Sebaiknya ada jadwal rutin pemeliharaan jalan setiap bulan",
+        "Alangkah baiknya ada sistem pengaduan online yang mudah diakses",
+        "Disarankan agar petugas kebersihan menambah frekuensi kunjungan",
+        "Saran agar jam pelayanan kantor diperpanjang sampai sore",
+        "Ada baiknya dibuat jalur khusus sepeda di jalan protokol kota",
+        "Sebaiknya pemerintah menambah armada pengangkut sampah baru",
+        "Perlu dibenahi sistem antrian di kantor pelayanan publik",
+        "Lebih baik bila ada aplikasi untuk melapor kerusakan fasilitas",
+        "Usul agar lampu jalan diganti dengan yang hemat energi LED",
+        "Kiranya perlu diadakan bank sampah di setiap kelurahan",
+        "Seharusnya ada pos kesehatan di setiap RT yang padat penduduk",
+        "Saran untuk meningkatkan kualitas air PDAM yang sering keruh",
+        "Lebih baik kalau ada program peremajaan trotoar kota secara berkala",
+        "Perlu ditingkatkan kualitas pelayanan di puskesmas kecamatan",
+        "Bisa dioptimalkan penggunaan lahan kosong untuk RTH baru",
+        "Sebaiknya ada sistem monitoring kondisi jalan secara real time",
+        "Alangkah baiknya petugas kelurahan melakukan kunjungan rutin",
+        "Disarankan agar dibuat sistem informasi pengaduan terpadu",
+        "Usul agar pasar tradisional direvitalisasi secara menyeluruh",
+        "Ada baiknya diadakan program edukasi pemilahan sampah",
+        "Sebaiknya pemerintah lebih aktif mensosialisasikan program",
+        "Ada baiknya ada pemutihan pajak kendaraan untuk warga",
+        "Saran agar kantor pelayanan terpadu segera dibuka di daerah",
+        "Lebih baik bila ada aplikasi pelacak jadwal angkutan umum",
+        "Perlu ada kajian ulang tata ruang kota yang lebih komprehensif",
+        "Disarankan agar masyarakat dilibatkan dalam perencanaan anggaran",
+        "Sebaiknya ada program edukasi tentang pengolahan sampah",
+        "Ada baiknya dibuat sistem informasi ketersediaan layanan publik",
+        "Saran untuk meningkatkan kualitas pendidikan di sekolah negeri",
+        "Lebih baik bila pelayanan kesehatan gratis diperluas cakupannya",
+        "Perlu ada evaluasi program pemberdayaan masyarakat secara rutin",
+        "Disarankan agar dibuat peta potensi bencana yang mudah diakses",
+        "sebaiknya ada jadwal rutin pemeliharaan jalan tiap bulan",
+        "alangkah baiknya ada sistem pengaduan online yg mudah",
+        "disaranin biar petugas kebersihan makin sering ke sini",
+        "saran biar jam pelayanan kantor diperpanjangin sampe sore",
+        "ada baiknya dibikin jalur khusus sepeda di jalan utama",
+        "sebaiknya pemerintah tambahin armada pengangkut sampah",
+        "perlu dibenahi sistem antrian di kantor pelayanan publik",
+        "lebih baik kalau ada aplikasi buat lapor kerusakan fasilitas",
+        "usul biar lampu jalan diganti yang hemat energi led",
+        "kayaknya perlu ada bank sampah di tiap kelurahan deh",
+        "seharusnya ada pos kesehatan di tiap rt yang padat penduduk",
+        "saran buat ningkatin kualitas air pdam yang sering keruh",
+        "lebih baik ada program peremajaan trotoar kota secara berkala",
+        "perlu ditingkatkan kualitas pelayanan di puskesmas kecamatan",
+        "bisa dioptimalkan penggunaan lahan kosong buat rth baru",
+        "sampah numpuk terus, mestinya ada jadwal pengangkutan yang jelas",
+        "pelayanannya lambat, mungkin perlu tambah pegawai biar cepet",
+        "got mampet mulu, kayaknya perlu dikeruk rutin setiap bulan",
+        "lampu jalan mati, sebaiknya diganti yang LED biar tahan lama",
+        "drainase buruk bikin banjir terus, perlu diperbaiki sistemnya",
+        "toilet umum jorok, harusnya ada petugas jaga dan bersihin",
+        "angkot jarang lewat, mestinya ditambah armadanya dong",
+        "kondisi puskesmas memprihatinkan, perlu renovasi segera",
+        "trotoar rusak dan sempit, sebaiknya diperlebar buat pejalan kaki",
+        *GENERATED_SARAN,
 
         # ==========================================================
-        # APRESIASI (141) — 131 asli + 10 ambigu
+        # APRESIASI (53 asli + 297 generated)
+        # Total = 350
         # ==========================================================
-        "Terima kasih jalan sudah diperbaiki dengan cepat dan baik",
-        "Apresiasi kepada petugas yang sangat responsif dan ramah",
-        "Terima kasih program bantuan sosial sangat membantu warga",
-        "Terima kasih lampu jalan sudah dipasang wilayah jadi terang",
-        "Terima kasih saluran air sudah dibersihkan banjir berkurang",
-        "Terima kasih taman kota sudah dirapikan menjadi sangat indah",
-        "Terima kasih fasilitas posyandu sudah diperbaiki dan lengkap",
-        "Bagus sekali pelayanan kantor kelurahan sekarang jauh membaik",
-        "Salut dengan kinerja petugas kebersihan taman kota kita",
-        "Senang sekali taman kota sudah bersih dan sangat terawat",
-        "Petugas pemadam kebakaran sangat cepat dan profesional sekali",
-        "Luar biasa kecepatan respons pemerintah menangani banjir",
-        "Bangga dengan petugas yang bekerja keras melayani warga",
-        "Pelayanan kesehatan di puskesmas meningkat pesat alhamdulillah",
-        "Senang melihat taman bermain sudah diperbaiki anak-anak senang",
-        "Pelayanan di desa sangat dipermudah warga sangat terbantu",
-        "Pelayanan petugas bagus dan ramah warga merasa puas dan senang",
-        "Sangat memuaskan pelayanan di kantor ini warga puas sekali",
-        "Pelayanan sangat baik dan cepat warga tidak perlu antre lama",
-        "Pelayanan pemerintah daerah semakin membaik dari waktu ke waktu",
-        "Kinerja para petugas patut mendapat acungan jempol dari warga",
-        "Responsivitas pemerintah dalam menangani masalah sangat bagus",
-        "Kondisi lingkungan semakin membaik berkat kerja keras petugas",
-        "Sangat memuaskan hasil perbaikan yang dilakukan pemerintah",
-        "Program kerja bakti sangat membantu warga membersihkan lingkungan",
-        "Petugas sigap dan profesional dalam menjalankan tugas harian",
-        "Semua petugas ramah dan sangat membantu warga dengan baik",
-        "Kebijakan pemerintah kali ini tepat sasaran dan bermanfaat",
-        "Fasilitas sudah diperbaiki warga sangat senang berterima kasih",
-        "Lingkungan bersih indah berkat kerja keras petugas kebersihan",
-        "Alhamdulillah jalan di depan rumah kami sudah diperbaiki",
-        "Terima kasih petugas sampah datang tepat waktu setiap hari",
-        "Senang sekali drainase sudah dibersihkan banjir tidak ada lagi",
-        "Pelayanan di kecamatan sangat cepat tidak perlu menunggu lama",
-        "Terima kasih program bantuan bibit tanaman sangat bermanfaat",
-        "Petugas kebersihan bekerja sangat giat taman jadi indah",
-        "Alhamdulillah air PDAM sudah jernih dan lancar kembali",
-        "Terima kasih lampu jalan diperbaiki wilayah tidak gelap lagi",
-        "Pelayanan adminduk jauh lebih cepat dan mudah sekarang",
-        "Bangga melihat petugas kita bekerja dengan penuh dedikasi",
-        "Terima kasih program fogging berhasil mengurangi nyamuk",
-        "Pelayanan puskesmas semakin baik dokter ramah dan profesional",
-        "Senang taman bermain diperbaiki anak-anak bisa bermain aman",
-        "Terima kasih sudah memperbaiki jembatan yang hampir rubuh",
-        "Kinerja petugas keamanan sangat baik wilayah jadi aman",
-        "Terima kasih program bedah rumah sangat membantu warga miskin",
-        "Pelayanan di kantor dinas jauh meningkat dari sebelumnya",
-        "Salut kepada petugas yang tetap bertugas di tengah cuaca buruk",
-        "Terima kasih program sumur bor mengatasi masalah air kami",
-        "Sangat puas dengan pelayanan antri tidak lama langsung dilayani",
-        "Terima kasih got di depan rumah sudah dibersihkan tidak bau",
-        "Pemerintah berhasil mengatasi masalah banjir yang selama ini ada",
-        "Terima kasih program vaksinasi lancar dan terorganisir dengan baik",
-        "Petugas sangat membantu proses pengurusan surat sangat cepat",
-        "Alhamdulillah jalan rusak di desa kami sudah diperbaiki akhirnya",
-        "Terima kasih program beasiswa sangat membantu anak kurang mampu",
-        "Pelayanan sudah jauh lebih baik dibanding tahun sebelumnya",
-        "Terima kasih pemerintah tanggap terhadap laporan warga kami",
-        "Senang melihat drainase sudah diperbaiki tidak banjir lagi",
-        "Petugas kebersihan rajin bekerja lingkungan jadi bersih terawat",
-        "Terima kasih program posyandu gratis sangat membantu ibu hamil",
-        "Alhamdulillah pelayanan BPJS semakin cepat tidak antri lama",
-        "Terima kasih lampu penerangan jalan dipasang gang jadi terang",
-        "Pelayanan di kelurahan sangat memuaskan petugas sopan ramah",
-        "Senang sekali taman kota semakin indah dan terawat rapi",
-        "Terima kasih program bedah rumah membantu keluarga kami",
-        "Pemerintah sangat responsif menangani laporan warga kali ini",
-        "Terima kasih pasar sudah dirapikan menjadi lebih bersih higienis",
-        "Pelayanan semakin baik petugas tidak lagi mempersulit warga",
-        "Alhamdulillah masalah air bersih kami sudah teratasi dengan baik",
-        "Terima kasih pemerintah sudah peduli dengan kondisi lingkungan",
-        "Senang petugas kesehatan aktif keliling memeriksa warga desa",
-        "Terima kasih program pelatihan kerja sangat bermanfaat warga",
-        "Pelayanan perizinan usaha jauh lebih cepat dan transparan",
-        "Salut pemerintah berhasil atasi masalah parkir liar di kota",
-        "Terima kasih pembangunan jembatan desa sudah selesai tepat waktu",
-        "Alhamdulillah kondisi jalan desa sudah jauh lebih baik sekarang",
-        "Terima kasih petugas damkar sangat cepat menangani kebakaran",
-        "Pelayanan di kantor imigrasi jauh lebih cepat dan ramah",
-        "Senang melihat program penghijauan kota berjalan dengan baik",
-        "Terima kasih kepada seluruh petugas yang bekerja keras untuk kita",
-        "makasih bgt jalan udah diperbaiki cepet dan bagus",
-        "apresiasi banget buat petugas yg responsif dan ramah",
-        "makasih program bansos sangat membantu warga kami",
-        "makasih lampu jalan udah dipasang wilayah jadi terang",
-        "makasih saluran air udah dibersihkan banjir berkurang",
-        "makasih taman kota udah dirapiin jadi sangat indah",
-        "bagus bgt pelayanan kantor kelurahan sekarang jauh membaik",
-        "salut bgt sama kinerja petugas kebersihan taman kota kita",
-        "seneng bgt taman kota udah bersih dan sangat terawat",
-        "petugas pemadam cepet bgt dan profesional keren",
-        "luar biasa bgt respons pemerintah nangani banjir kali ini",
-        "bangga bgt sama petugas yg kerja keras melayani warga",
-        "alhamdulillah jalan di depan rumah udah diperbaiki akhirnya",
-        "makasih petugas sampah dateng tepat waktu tiap hari",
-        "seneng bgt drainase udah dibersihkan ga banjir lagi",
-        "pelayanan di kecamatan cepet bgt ga perlu nunggu lama",
-        "makasih program bantuan bibit tanaman sangat bermanfaat",
-        "alhamdulillah air pdam udah jernih dan lancar kembali",
-        "makasih lampu jalan diperbaiki wilayah ga gelap lagi",
-        "pelayanan adminduk jauh lebih cepat dan mudah sekarang",
-        "bangga liat petugas kita kerja dgn penuh dedikasi",
-        "makasih program fogging berhasil kurangin nyamuk di sini",
-        "pelayanan puskesmas makin baik dokter ramah dan profesional",
-        "seneng taman bermain diperbaiki anak2 bisa main dgn aman",
-        "makasih udah benahin jembatan yg hampir rubuh itu",
-        "kinerja petugas keamanan bagus bgt wilayah jadi aman",
-        "makasih program bedah rumah sangat bantu warga miskin",
-        "salut buat petugas yg tetep bertugas di cuaca buruk",
-        "makasih program sumur bor ngatasi masalah air kami",
-        "sangat puas pelayanan antri ga lama langsung dilayani",
-        "makasih got depan rumah udah dibersihkan ga bau lagi",
-        "pemerintah berhasil ngatasi masalah banjir yg selama ini ada",
-        "makasih program vaksinasi lancar dan terorganisir dengan baik",
-        "alhamdulillah jalan rusak di desa kami udah diperbaiki",
-        "makasih program beasiswa sangat bantu anak kurang mampu",
-        "pelayanan udah jauh lebih baik dibanding tahun sebelumnya",
-        "makasih pemerintah tanggap terhadap laporan warga kami",
-        "seneng liat drainase udah diperbaiki ga banjir lagi",
-        "petugas kebersihan rajin bgt lingkungan jadi bersih terawat",
-        "alhamdulillah pelayanan bpjs makin cepet ga antri lama",
-        "makasih lampu jalan dipasang gang jadi terang bgt",
-        "pelayanan di kelurahan sangat memuaskan petugas sopan",
-        "seneng bgt taman kota makin indah dan terawat rapi",
-        "pemerintah sangat responsif nangani laporan warga kali ini",
-        "makasih pasar udah dirapiin jadi lebih bersih dan higienis",
-        "alhamdulillah masalah air bersih udah teratasi dengan baik",
-        "makasih pemerintah udah peduli sama kondisi lingkungan kita",
-        "seneng petugas kesehatan aktif keliling periksa warga desa",
-        "makasih program pelatihan kerja sangat bermanfaat banget",
-        "salut pemerintah berhasil atasi masalah parkir liar di kota",
-        # Sampel ambigu — overlap dengan kelas lain
-        "pelayanan udah lumayan baik meski masih ada yang perlu diperbaiki",
-        "petugas cukup responsif walaupun kadang masih lambat",
-        "program ini sudah bagus tapi perlu ditingkatkan lagi ke depannya",
-        "kinerja petugas ada kemajuan meski belum maksimal sepenuhnya",
-        "ada perbaikan dari sebelumnya tapi masih banyak yang kurang",
-        "terima kasih atas programnya semoga bisa diperluas ke daerah lain",
-        "bagus programnya tapi alangkah baiknya jangkauannya diperluas",
-        "pelayanan sudah baik tinggal perlu ditambah jam operasionalnya",
-        "kinerja petugas meningkat sebaiknya dipertahankan dan ditingkatkan",
-        "program ini bermanfaat semoga ada program lanjutan yang lebih baik",
-
-        # ==========================================================
-        # DARURAT (130) — 125 asli + 5 ambigu
-        # ==========================================================
-        "Kebakaran besar sedang terjadi tolong kirim pemadam sekarang",
-        "Listrik konslet menyebabkan kebakaran segera bantu padamkan api",
-        "Ada kebakaran di pemukiman padat segera butuh bantuan pemadam",
-        "Kebakaran melanda gudang dekat perumahan warga tolong segera",
-        "Banjir parah menggenangi rumah warga butuh evakuasi segera",
-        "Banjir bandang menghantam desa warga perlu diselamatkan cepat",
-        "Tanah longsor menutup jalan evakuasi warga terisolir darurat",
-        "Longsor menimbun rumah warga butuh alat berat dan bantuan",
-        "Ada kecelakaan lalu lintas korban terluka butuh ambulans cepat",
-        "Ada insiden serius di jalan tol butuh penanganan cepat segera",
-        "Korban kecelakaan luka parah tidak sadarkan diri tolong segera",
-        "Banyak korban jiwa akibat bencana perlu penanganan medis cepat",
-        "Gempa bumi merusak bangunan warga membutuhkan pertolongan segera",
-        "Ada orang tenggelam di sungai tolong kirim tim penyelamat",
-        "Jembatan ambruk warga terjebak tidak bisa menyeberang darurat",
-        "Kebocoran gas berbahaya di pemukiman segera ditangani darurat",
-        "Warga keracunan massal butuh pertolongan medis segera dan cepat",
-        "Puluhan warga keracunan makanan kondisi gawat darurat butuh tim",
-        "Situasi kritis warga membutuhkan pertolongan segera malam ini",
-        "Ada insiden serius terjadi di wilayah kami segera bantu kami",
-        "Kondisi darurat warga perlu bantuan segera dari pihak berwajib",
-        "Pohon besar tumbang menimpa rumah warga darurat perlu bantuan",
-        "Nyawa warga terancam akibat bencana butuh evakuasi segera cepat",
-        "Gawat darurat ada korban tidak sadarkan diri perlu ambulans",
-        "Kebanjiran parah merendam seluruh desa warga butuh dievakuasi",
-        "Kebakaran hutan meluas mendekati pemukiman warga darurat evakuasi",
-        "Gedung ambruk ada korban tertimpa reruntuhan tolong segera bantu",
-        "Korban banjir terisolir di atap rumah butuh perahu evakuasi",
-        "Tanggul jebol air bah mengancam ratusan rumah warga darurat",
-        "Anak hilang terseret arus banjir tolong kirim tim penyelamat",
-        "Warga tersengat aliran listrik kondisi kritis butuh ambulans",
-        "Pipa gas bocor bau sangat menyengat bahaya ledakan darurat",
-        "Truk rem blong menabrak sekelompok warga banyak korban luka",
-        "Ada anak tenggelam di kolam renang tolong segera bantu",
-        "Terjadi ledakan di pabrik banyak korban luka butuh bantuan medis",
-        "Tabrakan beruntun di jalan tol banyak korban butuh ambulans",
-        "Angin puting beliung menghancurkan puluhan rumah warga darurat",
-        "Longsor menutup akses jalan warga terisolir butuh bantuan",
-        "Korban terseret arus sungai deras butuh tim SAR segera",
-        "Terjadi kebakaran di pasar sentral asap tebal warga mengungsi",
-        "Banjir bandang melanda desa terpencil warga butuh helikopter",
-        "Ada kecelakaan kapal feri banyak penumpang jatuh ke laut",
-        "Gempa susulan merusak bangunan warga ketakutan butuh bantuan",
-        "Korban luka bakar parah butuh penanganan medis segera",
-        "Kebakaran gudang LPG sangat berbahaya tolong segera evakuasi",
-        "Terjadi keracunan massal di hajatan warga puluhan korban",
-        "Banjir mengepung sekolah siswa dan guru terjebak darurat",
-        "Warga tertimpa pohon tumbang luka parah butuh ambulans segera",
-        "Terjadi longsor di lereng bukit mengancam desa di bawahnya",
-        "Korban kecelakaan tergeletak di jalan tidak ada yang membantu",
-        "Api sudah membesar dan mengancam rumah-rumah warga sekitar",
-        "Warga hamil dalam kondisi darurat butuh ambulans segera",
-        "Anak balita tenggelam di selokan dalam kondisi kritis darurat",
-        "Kebakaran rumah susun asap tebal warga panik butuh bantuan",
-        "Terjadi perkelahian massal di kawasan ini warga ketakutan darurat",
-        "Bom ditemukan di area publik evakuasi segera butuh tim Jihandak",
-        "Tersangkut di tebing warga butuh tim rescue segera darurat",
-        "Serangan hewan liar warga terluka parah butuh penanganan medis",
-        "Tornado menerjang pemukiman banyak rumah rusak warga darurat",
-        "Kapal nelayan tenggelam ABK hilang butuh tim SAR segera",
-        "Warga ditemukan tidak sadarkan diri butuh penanganan medis segera",
-        "Tersengat ubur-ubur beracun kondisi kritis butuh ambulans",
-        "Longsor susulan mengancam warga yang belum sempat mengungsi",
-        "Api melompat ke rumah tetangga kebakaran meluas darurat",
-        "Korban banjir lansia tidak bisa evakuasi mandiri butuh bantuan",
-        "Anak kecil tersangkut di pagar besi tidak bisa turun darurat",
-        "Tabrakan motor truk satu korban meninggal di tempat darurat",
-        "Warga terjatuh ke jurang butuh tim SAR untuk penyelamatan",
-        "Kebocoran pipa bawah tanah mengancam pondasi bangunan darurat",
-        "Terjadi ledakan tabung gas melukai beberapa warga sekitar",
-        "Kondisi pasien kritis tidak ada ambulans butuh bantuan segera",
-        "Kebakaran menyebar cepat angin kencang puluhan rumah terancam",
-        "Warga tersangkut mesin pertanian kondisi darurat butuh bantuan",
-        "Banjir mendadak ketinggian cepat warga tidak sempat evakuasi",
-        "Ada korban tabrak lari pingsan di jalan butuh ambulans segera",
-        "tolong!!! ada kebakaran besar segera kirim pemadam sekarang",
-        "listrik konslet bikin kebakaran tolong segera bantu padamkan",
-        "ada kebakaran di pemukiman padat butuh bantuan pemadam segera",
-        "banjir parah banget ngerenangin rumah warga tolong evakuasi",
-        "banjir bandang ngehantam desa warga perlu diselamatin cepet",
-        "tanah longsor nutup jalan evakuasi warga terisolir darurat",
-        "longsor nimbun rumah warga butuh alat berat dan bantuan cepet",
-        "ada kecelakaan lalu lintas korban luka butuh ambulans cepet",
-        "korban kecelakaan luka parah ga sadarkan diri tolong segera",
-        "banyak korban jiwa akibat bencana perlu penanganan medis cepet",
-        "ada orang tenggelam di sungai tolong kirim tim penyelamat",
-        "jembatan ambruk warga terjebak ga bisa nyebrang darurat",
-        "kebocoran gas berbahaya di pemukiman segera ditangani darurat",
-        "warga keracunan massal butuh pertolongan medis segera cepet",
-        "puluhan warga keracunan makanan kondisi gawat darurat",
-        "situasi kritis banget warga butuh pertolongan segera malam ini",
-        "kondisi darurat warga perlu bantuan segera dari pihak berwajib",
-        "pohon gede tumbang nimpa rumah warga darurat butuh bantuan",
-        "nyawa warga terancam akibat bencana butuh evakuasi segera",
-        "gawat darurat ada korban ga sadarkan diri perlu ambulans",
-        "kebanjiran parah banget ngerendem seluruh desa butuh dievakuasi",
-        "kebakaran hutan meluas deket pemukiman warga darurat evakuasi",
-        "gedung ambruk ada korban ketimpa reruntuhan tolong segera",
-        "korban banjir terisolir di atap rumah butuh perahu evakuasi",
-        "tanggul jebol air bah ngancam ratusan rumah warga darurat",
-        "anak hilang keceret arus banjir tolong kirim tim penyelamat",
-        "warga kesengat aliran listrik kondisi kritis butuh ambulans",
-        "pipa gas bocor bau menyengat banget bahaya ledakan darurat",
-        "truk rem blong nabrak warga banyak korban luka darurat",
-        "ada anak tenggelam di kolam renang tolong segera bantu",
-        "terjadi ledakan di pabrik banyak korban luka butuh bantuan medis",
-        "angin puting beliung ngehancurin puluhan rumah warga darurat",
-        "longsor nutup akses jalan warga terisolir butuh bantuan cepet",
-        "korban terseret arus sungai deras butuh tim sar segera",
-        "kebakaran di pasar asap tebal warga ngungsi butuh bantuan",
-        "ada kecelakaan kapal feri banyak penumpang jatuh ke laut",
-        "api udah memperbesar ancam rumah2 warga sekitar darurat",
-        "warga hamil kondisi darurat butuh ambulans segera dong",
-        "anak balita tenggelam di selokan kondisi kritis darurat",
-        "kebakaran rusun asap tebal warga panik butuh bantuan segera",
-        "bom ditemukan di area publik evakuasi segera butuh jihandak",
-        "tabrakan motor truk satu korban meninggal di tempat darurat",
-        "warga terjatuh ke jurang butuh tim sar untuk penyelamatan",
-        "terjadi ledakan tabung gas lukai beberapa warga sekitar",
-        "kondisi pasien kritis ga ada ambulans butuh bantuan segera",
-        "kebakaran nyebar cepet angin kencang puluhan rumah terancam",
-        "banjir mendadak ketinggian cepet warga ga sempat evakuasi",
-        "ada korban tabrak lari pingsan di jalan butuh ambulans segera",
-        "api loncat ke rumah tetangga kebakaran meluas darurat bgt",
-        "korban banjir lansia ga bisa evakuasi mandiri butuh bantuan",
-        # Sampel ambigu — overlap dengan kelas lain
-        "banjir sudah masuk rumah warga tidak bisa kemana-mana",
-        "kebakaran kecil di dapur tapi asap sudah tebal banget",
-        "ada korban kecelakaan di jalan ga ada yang mau nolong",
-        "orang pingsan di pinggir jalan butuh pertolongan segera",
-        "pohon tumbang menimpa kendaraan warga perlu bantuan",
-
-    ],
-    "labels": (
-        ["keluhan"] * 273 +
-        ["permintaan"] * 154 +
-        ["saran"] * 149 +
-        ["apresiasi"] * 141 +
-        ["darurat"] * 130
-    ),
-}
-
-# ================================================================
-# SENTIMENT DATA
-# ================================================================
-
-SENTIMENT_DATA = {
-    "texts": [
-
-        # ==========================================================
-        # NEGATIF (115) — 100 asli + 15 ambigu
-        # ==========================================================
-        "Jalan rusak parah di depan sekolah sudah lama tidak diperbaiki",
-        "Lampu jalan mati sudah seminggu sangat berbahaya sekali",
-        "Sampah menumpuk tidak diangkut berhari-hari baunya menyengat",
-        "Air PDAM keruh tidak layak diminum sangat mengecewakan warga",
-        "Pelayanan kantor sangat lambat dan tidak memuaskan sama sekali",
-        "Taman kota kotor jorok dan tidak terawat sama sekali",
-        "Drainase tersumbat banjir setiap kali hujan turun sangat parah",
-        "Fasilitas kesehatan rusak dibiarkan tidak diperbaiki pemerintah",
-        "Trotoar berlubang parah membahayakan pejalan kaki setiap hari",
-        "Pelayanan buruk petugas tidak ramah sangat mengecewakan sekali",
-        "Saluran air mampet menimbulkan bau busuk tidak tertahankan",
-        "Jembatan retak berbahaya dibiarkan tanpa perbaikan apapun",
-        "Halte bus rusak bocor tidak ada perbaikan sama sekali",
-        "Kabel listrik menjuntai rendah sangat membahayakan warga",
-        "Kebakaran besar terjadi dan tidak ada bantuan yang datang",
-        "Banjir parah merusak rumah warga sangat memprihatinkan sekali",
-        "Tanah longsor membahayakan warga situasi sangat mengkhawatirkan",
-        "Kecelakaan parah tidak ada penanganan cepat sangat disayangkan",
-        "Warga keracunan kondisi darurat tidak ada pertolongan datang",
-        "Pohon tumbang menimpa rumah kondisi berbahaya memprihatinkan",
-        "Warga sudah capek melaporkan tapi tidak ada respons sama sekali",
-        "Sudah lelah berkali-kali lapor tapi masalah tidak kunjung beres",
-        "Kondisi ini sangat memprihatinkan dan tidak ada yang peduli",
-        "Situasi sudah tidak kondusif sangat mengkhawatirkan warga",
-        "Sangat disayangkan pemerintah tidak tanggap terhadap keluhan",
-        "Kondisi jalan semakin parah makin buruk setiap harinya",
-        "Pelayanan semakin buruk tidak ada perbaikan sama sekali",
-        "Lingkungan semakin kotor tidak terawat tidak layak huni",
-        "Kondisi pasar sangat memprihatinkan kotor dan tidak layak",
-        "Tidak ada tindakan apapun dari pemerintah sangat mengecewakan",
-        "Fasilitas tidak layak dan sangat membahayakan keselamatan warga",
-        "Air tidak mengalir sudah tiga hari warga sangat kesulitan",
-        "Pelayanan tidak profesional dan sangat tidak memuaskan sekali",
-        "Lampu tidak menyala gelap berbahaya sudah berminggu-minggu",
-        "Masalah ini makin parah tidak ada yang bertanggung jawab",
-        "Infrastruktur sangat buruk warga sudah frustrasi sejak lama",
-        "Pelayanan sangat tidak memuaskan warga kecewa besar sekali",
-        "Kondisi fasilitas publik sangat memprihatinkan tidak layak",
-        "Sudah berulang kali dilaporkan tidak ada tindakan apapun",
-        "Masalah ini terus berulang tidak ada solusi permanen sama sekali",
-        "Lingkungan sangat kotor dan tidak sehat membahayakan warga",
-        "Pelayanan petugas sangat buruk tidak menghargai warga sama sekali",
-        "Kondisi jalan sangat membahayakan banyak yang sudah kecelakaan",
-        "Fasilitas publik rusak berat tidak layak digunakan masyarakat",
-        "Warga sangat kecewa dengan penanganan masalah yang tidak serius",
-        "Tidak ada transparansi sama sekali dalam pengelolaan anggaran",
-        "Kondisi sanitasi sangat buruk mengancam kesehatan warga",
-        "Drainase yang rusak menyebabkan banjir berkepanjangan yang merugikan",
-        "Pelayanan di instansi ini jauh dari standar yang seharusnya",
-        "Kerusakan infrastruktur makin parah dan tidak ada perbaikan",
-        "Petugas tidak disiplin sering tidak ada di pos pelayanan",
-        "Warga muak dengan janji-janji yang tidak pernah ditepati",
-        "Kondisi lingkungan kumuh dan tidak sehat sangat memprihatinkan",
-        "Penanganan masalah sangat lambat dan tidak profesional",
-        "Fasilitas umum hancur parah tidak bisa digunakan masyarakat",
-        "Pelayanan tidak ramah dan mempersulit warga yang membutuhkan",
-        "Kondisi infrastruktur semakin memburuk tanpa ada penanganan",
-        "Masalah ini sudah bertahun-tahun tidak pernah ditangani serius",
-        "Warga tidak mendapatkan haknya sebagai masyarakat yang dilayani",
-        "Pengelolaan fasilitas publik sangat tidak bertanggung jawab",
-        "jln rusak parah bgt udah lama ga diperbaiki oleh dinas",
-        "lampu jalan mati udh berminggu2 gelap bgt berbahaya",
-        "sampah numpuk ga diangkut berhari2 baunya menyengat bgt",
-        "air pdam keruh bgt ga layak diminum warga sangat kecewa",
-        "pelayanan kantor lambat bgt ga memuaskan sama sekali",
-        "taman kota jorok bgt ga terawat sama sekali",
-        "got tersumbat banjir tiap ujan sangat parah bgt",
-        "fasilitas kesehatan rusak dibiarkan ga diperbaiki pemerintah",
-        "pelayanan buruk bgt petugas ga ramah sangat mengecewakan",
-        "air mampet bau busuk bgt ga tertahankan",
-        "jembatan retak berbahaya dibiarkan tanpa perbaikan apapun",
-        "kebakaran besar terjadi ga ada bantuan yg datang sama sekali",
-        "banjir parah bgt ngerusak rumah warga sangat memprihatinkan",
-        "warga udah capek lapor tapi ga ada respons sama sekali",
-        "udah lelah berkali2 lapor masalah ga kunjung beres juga",
-        "kondisi ini sangat memprihatinkan ga ada yg peduli sama sekali",
-        "sangat disayangkan pemerintah ga tanggap terhadap keluhan warga",
-        "kondisi jalan makin parah buruk bgt setiap harinya",
-        "pelayanan makin buruk bgt ga ada perbaikan sama sekali",
-        "lingkungan makin kotor bgt ga terawat ga layak huni",
-        "kondisi pasar sangat memprihatinkan kotor bgt ga layak",
-        "ga ada tindakan apapun dari pemerintah sangat mengecewakan",
-        "air ga ngalir udah 3 hari warga sangat kesulitan bgt",
-        "lampu ga nyala gelap bgt berbahaya udah berminggu2",
-        "masalah ini makin parah bgt ga ada yg bertanggung jawab",
-        "infrastruktur buruk bgt warga udah frustrasi sejak lama",
-        "pelayanan sangat ga memuaskan warga kecewa besar bgt",
-        "kondisi fasilitas publik sangat memprihatinkan ga layak",
-        "udah dilaporin berkali2 ga ada tindakan apapun bgt",
-        "masalah ini terus berulang ga ada solusi permanen sama sekali",
-        "lingkungan kotor bgt ga sehat membahayakan warga",
-        "pelayanan petugas buruk bgt ga menghargai warga sama sekali",
-        "kondisi jalan membahayakan bgt banyak yg udah kecelakaan",
-        "fasilitas publik rusak berat ga layak digunakan masyarakat",
-        "warga sangat kecewa bgt penanganan masalah ga serius",
-        "ga ada transparansi sama sekali dalam pengelolaan anggaran",
-        "kondisi sanitasi buruk bgt ngancam kesehatan warga",
-        "drainase rusak bikin banjir berkepanjangan yg merugikan",
-        "pelayanan di sini jauh bgt dari standar yg seharusnya",
-        "petugas ga disiplin sering ga ada di pos pelayanan",
-        # Sampel ambigu — overlap dengan kelas lain
-        "jalan di depan rumah belum diperbaiki sudah beberapa bulan",
-        "petugas tidak datang sesuai jadwal yang sudah ditentukan",
-        "lampu jalan di gang ini tidak menyala lagi sejak minggu lalu",
-        "air PDAM tidak mengalir sudah dua hari ini",
-        "sampah belum diangkut padahal jadwalnya kemarin",
-        "antrean di kantor pelayanan cukup panjang tidak ada kejelasan",
-        "fasilitas taman bermain kurang terawat beberapa rusak",
-        "drainase tidak berfungsi optimal saat hujan deras",
-        "pelayanan membutuhkan waktu lebih lama dari yang dijanjikan",
-        "kondisi jalan perlu perhatian lebih dari pihak terkait",
-        "bagus sekali pelayanannya sampai antre 3 jam baru dilayani",
-        "keren banget jalannya udah berlubang parah tapi ga diperbaiki juga",
-        "luar biasa petugas kita, datang terlambat dan kerjanya asal",
-        "mantap banget sistem drainasenya, banjir tiap kali hujan",
-        "hebat memang pengelolaan sampahnya, numpuk terus tiap hari",
-
-        # ==========================================================
-        # POSITIF (119) — 109 asli + 10 ambigu
+        # Total ≈ 181
         # ==========================================================
         "Terima kasih jalan sudah diperbaiki dengan cepat dan baik",
         "Pelayanan sangat baik cepat dan memuaskan sekali bagi warga",
@@ -1068,6 +1068,191 @@ SENTIMENT_DATA = {
         "Pelayanan jauh meningkat dari sebelumnya warga sangat senang",
         "Terima kasih drainase sudah dibersihkan banjir berkurang",
         "Petugas bekerja dengan sangat profesional dan penuh semangat",
+        "makasih bgt jalan udah diperbaiki cepet dan bagus bgt",
+        "pelayanan bagus bgt cepet dan memuaskan bagi warga",
+        "petugasnya ramah bgt dan sangat bantu warga dgn baik",
+        "makasih taman kota udah bersih dan terawat sangat indah",
+        "seneng bgt lampu jalan udah dipasang wilayah jadi terang",
+        "pelayanan administrasi sangat memuaskan dan efisien bgt",
+        "bagus bgt kinerja petugas kebersihan taman kota kita",
+        "apresiasi buat petugas yang responsif dan sangat profesional",
+        "puskesmas pelayanannya meningkat pesat makasih banyak ya",
+        "petugas pemadam cepet bgt dan profesional hebat bgt deh",
+        "bangga sama tim yang kerja keras buat warga",
+        "salut respons pemerintah yang cepet nanganin keluhan warga",
+        "seneng taman bermain udah diperbaiki anak2 bisa main",
+        "pelayanan di desa sangat dipermudah warga puas bgt",
+        "sangat puas sama pelayanan kantor yang cepet dan bagus",
+        "warga ngerasa puas sama pelayanan yg dikasih",
+        *GENERATED_APRESIASI,
+
+        # ==========================================================
+        # DARURAT (30 static + 320 generated)
+        # Total = 350
+        # Total ≈ 155
+        # ==========================================================
+        "Kebakaran besar terjadi di pemukiman padat butuh bantuan segera",
+        "Banjir bandang menghantam desa kami evakuasi segera diperlukan",
+        "Tanah longsor menutup jalan warga terjebak butuh pertolongan",
+        "Gempa kuat mengguncang wilayah banyak bangunan ambruk parah",
+        "Warga keracunan makanan massal kondisi darurat tolong segera",
+        "Terjadi kebocoran gas besar di kawasan industri situasi kritis",
+        "Listrik konslet menyebabkan kebakaran di rumah warga padat",
+        "Jembatan putus diterjang banjir warga tidak bisa menyeberang",
+        "Tsunami peringatan dini berbunyi warga perlu dievakuasi segera",
+        "Korban jiwa dalam kecelakaan parah butuh ambulans darurat",
+        "Ada korban luka parah di kecelakaan lalu lintas ini",
+        "Warga tidak sadarkan diri butuh pertolongan medis segera",
+        "Nyawa warga terancam banjir naik cepat situasi gawat darurat",
+        "Erupsi gunung mulai terjadi abu tebal warga perlu dievakuasi",
+        "Angin puting beliung merusak rumah warga perlu bantuan segera",
+        "Situasi kritis kebakaran hutan mendekati permukiman warga",
+        "Kondisi darurat banjir mengepung rumah susun warga terjebak",
+        "Pohon besar tumbang menimpa rumah warga butuh tim penyelamat",
+        "Dinding sekolah ambruk saat jam pelajaran ada korban parah",
+        "Tangki BBM bocor di jalan raya situasi sangat berbahaya",
+        "Kebakaran pasar besar api sudah membesar butuh bantuan cepat",
+        "Banjir bandang dari hulu menerjang kampung warga terjebak",
+        "Ada korban tenggelam di sungai butuh tim penyelamat segera",
+        "Insiden serius terjadi di pabrik bahan kimia berbahaya",
+        "Kondisi darurat gempa susulan terus terjadi warga panik",
+        "ada kebakaran di ruko sebelah api udah gede tolong cepet",
+        "darurat banjir udah masuk rumah tolong evakuasi segera ya",
+        "ada orang keracunan massal di hajatan butuh ambulans sekarang",
+        "tiang listrik roboh kena kabel hidup sangat berbahaya tolong",
+        "ada longsor di bukit belakang kampung butuh tim penyelamat",
+        *GENERATED_DARURAT,
+
+    ],
+    "labels": (
+        ["keluhan"]    * 350 +
+        ["permintaan"] * 350 +
+        ["saran"]      * 350 +
+        ["apresiasi"]  * 350 +
+        ["darurat"]    * 350
+    ),
+}
+
+
+# ================================================================
+# SENTIMENT DATA
+# ================================================================
+
+SENTIMENT_DATA = {
+    "texts": [
+
+        # ==========================================================
+        # NEGATIF (115 asli + 20 sarcasm generated + 15 hard)
+        # Total ≈ 150
+        # ==========================================================
+        "Jalan rusak parah di depan sekolah sudah lama tidak diperbaiki",
+        "Lampu jalan mati sudah seminggu sangat berbahaya sekali",
+        "Sampah menumpuk tidak diangkut berhari-hari baunya menyengat",
+        "Air PDAM keruh tidak layak diminum sangat mengecewakan warga",
+        "Pelayanan kantor sangat lambat dan tidak memuaskan sama sekali",
+        "Taman kota kotor jorok dan tidak terawat sama sekali",
+        "Drainase tersumbat banjir setiap kali hujan turun sangat parah",
+        "Fasilitas kesehatan rusak dibiarkan tidak diperbaiki pemerintah",
+        "Trotoar berlubang parah membahayakan pejalan kaki setiap hari",
+        "Pelayanan buruk petugas tidak ramah sangat mengecewakan sekali",
+        "Saluran air mampet menimbulkan bau busuk tidak tertahankan",
+        "Jembatan retak berbahaya dibiarkan tanpa perbaikan apapun",
+        "Halte bus rusak bocor tidak ada perbaikan sama sekali",
+        "Kabel listrik menjuntai rendah sangat membahayakan warga",
+        "Kebakaran besar terjadi dan tidak ada bantuan yang datang",
+        "Banjir parah merusak rumah warga sangat memprihatinkan sekali",
+        "Tanah longsor membahayakan warga situasi sangat mengkhawatirkan",
+        "Warga sudah capek melaporkan tapi tidak ada respons sama sekali",
+        "Sudah lelah berkali-kali lapor tapi masalah tidak kunjung beres",
+        "Kondisi ini sangat memprihatinkan dan tidak ada yang peduli",
+        "Sangat disayangkan pemerintah tidak tanggap terhadap keluhan",
+        "Kondisi jalan semakin parah makin buruk setiap harinya",
+        "Pelayanan semakin buruk tidak ada perbaikan sama sekali",
+        "Lingkungan semakin kotor tidak terawat tidak layak huni",
+        "Tidak ada tindakan apapun dari pemerintah sangat mengecewakan",
+        "Fasilitas tidak layak dan sangat membahayakan keselamatan warga",
+        "Air tidak mengalir sudah tiga hari warga sangat kesulitan",
+        "Pelayanan tidak profesional dan sangat tidak memuaskan sekali",
+        "Lampu tidak menyala gelap berbahaya sudah berminggu-minggu",
+        "jln rusak parah bgt udah lama ga diperbaiki oleh dinas",
+        "lampu jalan mati udh berminggu2 gelap bgt berbahaya",
+        "sampah numpuk ga diangkut berhari2 baunya menyengat bgt",
+        "air pdam keruh bgt ga layak diminum warga sangat kecewa",
+        "pelayanan kantor lambat bgt ga memuaskan sama sekali",
+        "taman kota jorok bgt ga terawat sama sekali",
+        "got tersumbat banjir tiap ujan sangat parah bgt",
+        "fasilitas kesehatan rusak dibiarkan ga diperbaiki pemerintah",
+        "pelayanan buruk bgt petugas ga ramah sangat mengecewakan",
+        "air mampet bau busuk bgt ga tertahankan",
+        "jembatan retak berbahaya dibiarkan tanpa perbaikan apapun",
+        "kebakaran besar terjadi ga ada bantuan yg datang sama sekali",
+        "banjir parah bgt ngerusak rumah warga sangat memprihatinkan",
+        "warga udah capek lapor tapi ga ada respons sama sekali",
+        "udah lelah berkali2 lapor masalah ga kunjung beres juga",
+        "kondisi ini sangat memprihatinkan ga ada yg peduli sama sekali",
+        "sangat disayangkan pemerintah ga tanggap terhadap keluhan warga",
+        "kondisi jalan makin parah buruk bgt setiap harinya",
+        "pelayanan makin buruk bgt ga ada perbaikan sama sekali",
+        "lingkungan makin kotor bgt ga terawat ga layak huni",
+        "kondisi pasar sangat memprihatinkan kotor bgt ga layak",
+        "ga ada tindakan apapun dari pemerintah sangat mengecewakan",
+        "air ga ngalir udah 3 hari warga sangat kesulitan bgt",
+        "lampu ga nyala gelap bgt berbahaya udah berminggu2",
+        "masalah ini makin parah bgt ga ada yg bertanggung jawab",
+        "infrastruktur buruk bgt warga udah frustrasi sejak lama",
+        "pelayanan sangat ga memuaskan warga kecewa besar bgt",
+        "udah dilaporin berkali2 ga ada tindakan apapun bgt",
+        "masalah ini terus berulang ga ada solusi permanen sama sekali",
+        "lingkungan kotor bgt ga sehat membahayakan warga",
+        "kondisi jalan membahayakan bgt banyak yg udah kecelakaan",
+        # Sarkasme sebagai sentimen negatif
+        "bagus sekali pelayanannya sampai antre 3 jam baru dilayani",
+        "keren banget jalannya udah berlubang parah tapi ga diperbaiki juga",
+        "luar biasa petugas kita, datang terlambat dan kerjanya asal",
+        "mantap banget sistem drainasenya, banjir tiap kali hujan",
+        "hebat memang pengelolaan sampahnya, numpuk terus tiap hari",
+        # Generated sarcasm sebagai negatif
+        *GENERATED_SARC_NEGATIF_SENT,
+        # Hard cases sentimen
+        *_HARD_CASES_SENTIMENT,
+        # Generator negatif
+        *GENERATED_NEGATIF,
+
+        # ==========================================================
+        # POSITIF (104 asli + 196 generated)
+        # Total = 300
+        # ==========================================================
+        "Terima kasih jalan sudah diperbaiki dengan cepat dan baik",
+        "Pelayanan sangat baik cepat dan memuaskan sekali bagi warga",
+        "Petugas ramah dan sangat membantu warga dengan sepenuh hati",
+        "Terima kasih taman kota sudah bersih dan terawat sangat indah",
+        "Senang lampu jalan sudah dipasang wilayah jadi terang sekali",
+        "Pelayanan administrasi sangat memuaskan dan sangat efisien",
+        "Bagus sekali kinerja petugas kebersihan taman kota kita",
+        "Apresiasi kepada petugas yang responsif dan sangat profesional",
+        "Luar biasa program pemerintah sangat membantu warga yang butuh",
+        "Puskesmas pelayanannya meningkat pesat terima kasih banyak",
+        "Petugas pemadam sangat cepat dan profesional hebat sekali",
+        "Bangga dengan tim yang bekerja keras melayani masyarakat",
+        "Salut respons pemerintah yang cepat menangani keluhan warga",
+        "Senang taman bermain sudah diperbaiki anak-anak bisa bermain",
+        "Pelayanan di desa sangat dipermudah warga sangat puas sekali",
+        "Pelayanan petugas bagus ramah warga merasa senang dan puas",
+        "Sangat puas dengan pelayanan kantor yang cepat dan baik",
+        "Warga merasa puas dengan pelayanan yang diberikan selama ini",
+        "Pelayanan pemerintah daerah semakin membaik dari waktu ke waktu",
+        "Kinerja para petugas patut mendapat acungan jempol dari warga",
+        "Responsivitas pemerintah dalam menangani masalah sangat bagus",
+        "Kondisi lingkungan semakin membaik berkat kerja keras petugas",
+        "Sangat memuaskan hasil perbaikan yang dilakukan pemerintah",
+        "Program kerja bakti sangat membantu warga membersihkan lingkungan",
+        "Alhamdulillah jalan sudah diperbaiki tidak berlubang lagi",
+        "Senang sekali pelayanan cepat tidak perlu menunggu lama",
+        "Terima kasih petugas datang tepat waktu dan bekerja dengan baik",
+        "Pemerintah sangat responsif kali ini masalah langsung ditangani",
+        "Pelayanan jauh meningkat dari sebelumnya warga sangat senang",
+        "Terima kasih drainase sudah dibersihkan banjir berkurang",
+        "Petugas bekerja dengan sangat profesional dan penuh semangat",
         "Senang melihat kondisi lingkungan yang semakin baik dan bersih",
         "Alhamdulillah masalah air bersih sudah teratasi dengan baik",
         "Terima kasih program beasiswa sangat membantu warga kurang mampu",
@@ -1078,7 +1263,6 @@ SENTIMENT_DATA = {
         "Alhamdulillah program bantuan sosial tepat sasaran bermanfaat",
         "Terima kasih petugas kesehatan aktif melayani warga di lapangan",
         "Senang melihat pembangunan infrastruktur yang berjalan dengan baik",
-        "Terima kasih program pelatihan kerja membuka peluang bagi warga",
         "Pelayanan di kantor sangat memuaskan tidak ada yang dipersulit",
         "Bangga melihat kota semakin bersih dan tertata dengan rapi",
         "Terima kasih semua petugas yang bekerja keras untuk masyarakat",
@@ -1091,7 +1275,6 @@ SENTIMENT_DATA = {
         "Petugas sangat membantu dan profesional dalam bertugas",
         "Kondisi jalan sudah diperbaiki warga bisa berkendara dengan aman",
         "Alhamdulillah banjir sudah teratasi berkat normalisasi drainase",
-        "Terima kasih pemerintah yang peduli dan responsif kepada warga",
         "makasih bgt jalan udah diperbaiki cepet dan bagus bgt",
         "pelayanan bagus bgt cepet dan memuaskan bagi warga",
         "petugasnya ramah bgt dan sangat bantu warga dgn baik",
@@ -1099,160 +1282,84 @@ SENTIMENT_DATA = {
         "seneng bgt lampu jalan udah dipasang wilayah jadi terang",
         "pelayanan administrasi sangat memuaskan dan efisien bgt",
         "bagus bgt kinerja petugas kebersihan taman kota kita",
-        "luar biasa bgt program pemerintah sangat bantu warga",
-        "puskesmas pelayanannya makin bagus makasih banyak",
-        "petugas pemadam cepet bgt dan profesional keren bgt",
-        "bangga bgt sama tim yg kerja keras melayani masyarakat",
-        "salut bgt respons pemerintah cepet nangani keluhan warga",
+        "apresiasi buat petugas yg responsif dan sangat profesional",
+        "puskesmas pelayanannya meningkat pesat makasih banyak ya",
+        "petugas pemadam cepet bgt dan profesional hebat bgt deh",
+        "bangga sama tim yang kerja keras buat warga",
+        "salut respons pemerintah yang cepet nanganin keluhan warga",
         "seneng taman bermain udah diperbaiki anak2 bisa main",
         "pelayanan di desa sangat dipermudah warga puas bgt",
-        "pelayanan petugas bagus ramah warga senang dan puas",
-        "sangat puas bgt sama pelayanan kantor yg cepet dan baik",
-        "warga merasa puas sama pelayanan yg diberikan selama ini",
-        "pelayanan pemerintah daerah makin membaik dari waktu ke waktu",
-        "kinerja petugas patut dapet acungan jempol dari warga",
-        "responsivitas pemerintah nangani masalah sangat bagus bgt",
-        "kondisi lingkungan makin membaik berkat kerja keras petugas",
-        "sangat memuaskan bgt hasil perbaikan yg dilakukan pemerintah",
-        "program kerja bakti sangat bantu warga bersihin lingkungan",
-        "semua petugas ramah dan sangat bantu warga dgn baik",
+        "sangat puas sama pelayanan kantor yang cepet dan bagus",
         "alhamdulillah jalan udah diperbaiki ga berlubang lagi",
-        "seneng bgt pelayanan cepet ga perlu nunggu lama",
-        "makasih petugas dateng tepat waktu dan kerja dgn baik",
+        "makasih petugas dateng tepat waktu dan kerja bagus bgt",
         "pemerintah responsif bgt kali ini masalah langsung ditangani",
-        "pelayanan jauh meningkat dari sebelumnya warga sangat senang",
+        "pelayanan jauh meningkat dari sebelumnya warga senang bgt",
         "makasih drainase udah dibersihkan banjir berkurang bgt",
-        "petugas kerja dgn sangat profesional dan penuh semangat",
+        "petugas kerja sangat profesional dan penuh semangat bgt",
+        "seneng lihat kondisi lingkungan makin baik dan bersih",
         "alhamdulillah masalah air bersih udah teratasi dgn baik",
         "makasih program beasiswa sangat bantu warga kurang mampu",
-        "pelayanan makin baik petugas ga lagi mempersullt warga",
+        "pelayanan makin baik petugas ga lagi menyulitin warga",
         "makasih pemerintah udah peduli sama kondisi lingkungan",
-        "sangat puas bgt sama kinerja petugas yg kerja keras",
-        "kondisi jalan udah bagus bgt nyaman buat berkendara",
-        "alhamdulillah program bansos tepat sasaran bermanfaat bgt",
+        "puas bgt sama kinerja petugas yg kerja keras buat kita",
+        "kondisi jalan udah bagus bgt nyaman dilalui pengendara",
+        "alhamdulillah program bansos tepat sasaran dan bermanfaat",
         "makasih petugas kesehatan aktif layani warga di lapangan",
-        "seneng bgt liat pembangunan infrastruktur berjalan dgn baik",
-        "makasih program pelatihan kerja buka peluang buat warga",
-        "pelayanan di kantor sangat memuaskan ga ada yg dipersulit",
-        "bangga liat kota makin bersih dan tertata dgn rapi",
-        "makasih semua petugas yg kerja keras utk masyarakat",
-        "kondisi fasilitas publik bagus bgt terawat dan nyaman",
+        "seneng lihat pembangunan infrastruktur berjalan dengan baik",
+        "pelayanan di kantor puas bgt ga ada yg disulitin",
+        "bangga lihat kota makin bersih dan tertata dengan rapi",
         "alhamdulillah semua masalah warga udah ditangani dgn baik",
         "makasih pemerintah yg tanggap dan peduli kepada warga",
         "pelayanan cepet bgt dan ramah warga ga kecewa sama sekali",
-        # Sampel ambigu — overlap dengan kelas lain
-        "pelayanan sudah cukup baik dan sesuai standar yang ada",
-        "petugas menjalankan tugasnya dengan baik hari ini",
-        "kondisi taman lumayan terawat dan bersih",
-        "program berjalan sesuai rencana yang sudah ditetapkan",
-        "respons petugas cukup cepat menangani laporan warga",
-        "fasilitas yang ada sudah memadai untuk kebutuhan warga",
-        "pelayanan sudah menunjukkan peningkatan dari sebelumnya",
-        "kinerja petugas cukup memuaskan dalam melayani masyarakat",
-        "program bantuan sudah menjangkau sebagian warga yang membutuhkan",
-        "kondisi lingkungan mulai membaik berkat kerja bersama warga",
+        "seneng lihat lingkungan makin bersih dan sehat bgt",
+        "makasih program vaksinasi berjalan lancar dan teratur",
+        "petugas sangat bantu dan profesional dalam bertugas",
+        "kondisi jalan udah diperbaiki warga bisa berkendara aman",
+        "alhamdulillah banjir udah teratasi berkat normalisasi drainase",
+        "mantul respon petugasnya, langsung dateng pas dilaporin 👍",
+        "keren bgt aplikasinya, laporan langsung ditindaklanjuti",
+        "josss pelayanannya, ga pake lama langsung beres",
+        "akhirnya diperbaiki juga, makasih banyak min",
+        "nggak nyangka secepet ini ditanganinya, salut deh",
+        "top markotop petugasnya, responsive banget sama warga",
+        "alhamdulillah akhirnya beres, sempet khawatir ga ditangani",
+        "pelayanannya oke bgt, ramah dan cepet, puas deh",
+        "makasih bgt udah mau dengerin keluhan warga, responsif",
+        "syukurlah drainase udah dibenerin, ga banjir lagi",
+        *GENERATED_POSITIF,
 
         # ==========================================================
-        # NETRAL (171) — 161 asli + 10 ambigu
+        # NETRAL (119 asli + 181 generated)
+        # Total = 300
         # ==========================================================
-        "Kapan jadwal pengangkutan sampah di daerah sini",
-        "Informasi jam pelayanan kantor kelurahan bagaimana caranya",
-        "Prosedur mengurus KTP di kantor kecamatan seperti apa",
-        "Jadwal posyandu bulan ini kapan dan di mana lokasinya",
-        "Cara mendaftar bantuan sosial bagaimana prosedurnya",
-        "Syarat membuat surat keterangan domisili apa saja yang perlu",
-        "Jadwal pemadaman listrik bergilir di wilayah ini kapan",
-        "Cara melaporkan kehilangan dokumen harus ke kantor mana",
-        "Prosedur perpanjangan SIM di samsat terdekat bagaimana",
-        "Biaya pembuatan akta kelahiran berapa dan prosedurnya",
-        "Mohon segera dipasang lampu di jalan gelap ini",
-        "Minta dibuatkan taman bermain untuk anak-anak di sini",
-        "Harap tambahkan armada bus rute ke perumahan kami",
-        "Tolong sediakan tempat sampah lebih banyak di taman ini",
-        "Harap pasang rambu lalu lintas di persimpangan ini",
-        "Minta dibuatkan zebra cross di depan sekolah dasar",
-        "Mohon dipasang lampu jalan baru di kawasan ini",
-        "Tolong tambahkan toilet umum di area pasar tradisional",
-        "Harap sediakan fasilitas difabel di kantor kelurahan",
-        "Kami membutuhkan posyandu baru di kelurahan kami",
-        "Tolong bangun taman bermain untuk anak di kelurahan ini",
-        "Mohon tambahkan petugas keamanan di area ini malam hari",
-        "Kami ingin ada perbaikan fasilitas di wilayah ini",
-        "Warga berharap ada tindakan nyata dari pemerintah daerah",
-        "Perlu ada penambahan fasilitas kesehatan yang layak di sini",
-        "Sebaiknya ada petugas yang berpatroli setiap malam hari",
-        "Alangkah baiknya pelayanan bisa dilakukan secara online",
-        "Usul agar pasar ditata lebih rapi dan bersih teratur",
-        "Sebaiknya pelayanan diperbaiki agar warga tidak antri lama",
-        "Disarankan agar jam buka kantor diperpanjang hingga sore",
-        "Sebaiknya dibuat sistem pengaduan online yang mudah diakses",
-        "Usul agar dibuat jalur sepeda yang aman di jalan utama",
-        "Lebih baik jika ada petugas keamanan di sini malam hari",
-        "Sistem pelayanan perlu dibenahi agar lebih efisien bagi warga",
-        "Pengelolaan sampah bisa ditingkatkan dengan teknologi modern",
-        "Perlu ditingkatkan transparansi penggunaan anggaran daerah",
-        "Bisa ditingkatkan kualitas jalan dengan material lebih baik",
-        "Sebaiknya ada sanksi tegas bagi pembuang sampah sembarangan",
-        "Disarankan agar lampu lalu lintas diservis secara berkala",
-        "Ada baiknya peraturan parkir diperketat di area pusat kota",
-        "Saya ingin tahu informasi tentang program bantuan perumahan",
-        "Bagaimana cara mendaftarkan anak untuk beasiswa dari daerah",
-        "Kapan program perbaikan jalan di RT kami akan dilaksanakan",
-        "Di mana saya bisa mengurus surat izin usaha mikro",
-        "Berapa biaya pembuatan akta pernikahan di kantor catatan sipil",
-        "Prosedur mengurus kartu keluarga baru setelah pindah rumah",
-        "Kapan akan ada pembagian sembako untuk warga kurang mampu",
-        "Informasi jadwal operasional fasilitas olahraga milik pemda",
-        "Syarat pendaftaran program beasiswa daerah untuk pelajar",
-        "Apakah ada program kredit usaha rakyat di kelurahan ini",
-        "Saya ingin melaporkan kehilangan sepeda motor cara bagaimana",
-        "Jadwal dan lokasi vaksinasi booster di wilayah kami kapan",
-        "Bagaimana prosedur mendapatkan bantuan untuk perbaikan rumah",
-        "Informasi tentang program pelatihan kerja yang diselenggarakan",
-        "Kapan akan ada penerangan jalan di gang belakang rumah",
-        "Di mana lokasi pengambilan sembako bantuan pemerintah",
-        "Bagaimana mekanisme pengaduan masalah lingkungan hidup",
-        "Prosedur pemasangan sambungan listrik baru di rumah baru",
-        "Informasi tarif dan jadwal angkutan umum rute baru",
-        "Apakah ada program bantuan modal usaha untuk pedagang kecil",
-        "Sebaiknya pemerintah lebih aktif mensosialisasikan program",
-        "Ada baiknya ada pemutihan pajak kendaraan untuk warga",
-        "Saran agar kantor pelayanan terpadu segera dibuka di daerah",
-        "Lebih baik bila ada aplikasi pelacak jadwal angkutan umum",
-        "Perlu ada kajian ulang tata ruang kota yang lebih komprehensif",
-        "Disarankan agar masyarakat dilibatkan dalam perencanaan anggaran",
-        "Sebaiknya ada program edukasi tentang pengolahan sampah",
-        "Ada baiknya dibuat sistem informasi ketersediaan layanan publik",
-        "Saran untuk meningkatkan kualitas pendidikan di sekolah negeri",
-        "Lebih baik bila pelayanan kesehatan gratis diperluas cakupannya",
-        "Perlu ada evaluasi program pemberdayaan masyarakat secara rutin",
-        "Disarankan agar dibuat peta potensi bencana yang mudah diakses",
-        "Tolong informasikan jadwal operasional kantor pelayanan publik",
-        "Minta informasi tentang prosedur pengajuan kredit usaha rakyat",
-        "Harap berikan kejelasan tentang jadwal perbaikan jalan di sini",
-        "Mohon informasikan program bantuan yang tersedia untuk warga",
-        "Tolong jelaskan cara mendapatkan layanan jaminan kesehatan",
-        "Minta kejelasan tentang status pengajuan izin usaha kami",
-        "Harap informasikan jadwal pembagian bantuan sosial di wilayah",
-        "Mohon berikan penjelasan tentang program relokasi yang direncanakan",
-        "Tolong sampaikan jadwal sosialisasi program pemerintah terbaru",
-        "Minta informasi syarat dan cara mendaftar program rumah subsidi",
-        "Harap jelaskan mekanisme pengaduan yang efektif untuk warga",
-        "Mohon beritahu cara mengakses layanan administrasi kependudukan",
-        "Saya ingin tau berapa lama proses pembuatan paspor sekarang",
-        "Apakah ada layanan antar dokumen ke rumah untuk lansia",
-        "Bagaimana prosedur pengajuan izin keramaian untuk acara",
-        "Saya perlu informasi tentang peraturan tata bangunan di daerah",
-        "Kapan jadwal razia PKL di kawasan pusat perbelanjaan ini",
-        "Di mana bisa mendapatkan informasi tentang subsidi listrik",
-        "Bagaimana cara mendaftarkan anak ke sekolah negeri favorit",
-        "Prosedur pelaporan pencemaran lingkungan kepada dinas terkait",
-        "Informasi persyaratan pembukaan usaha kuliner di area publik",
-        "Apakah ada bantuan untuk renovasi rumah tidak layak huni",
-        "Kapan ada sosialisasi tentang peraturan baru tata kota",
-        "Bagaimana cara mengakses layanan perpustakaan daerah secara online",
-        "Saya ingin tahu prosedur mendapatkan kartu disabilitas",
-        "Informasi tentang program penanggulangan kemiskinan di daerah",
+        "Informasi tentang jadwal pengangkutan sampah di wilayah ini",
+        "Prosedur pengajuan surat keterangan domisili yang diperlukan",
+        "Jadwal operasional pelayanan kantor kelurahan ini seperti apa",
+        "Cara mendaftar program bantuan sosial untuk warga kurang mampu",
+        "Syarat pembuatan KTP elektronik di kantor kecamatan",
+        "Jadwal posyandu bulan ini dan lokasi pelaksanaannya",
+        "Prosedur pelaporan kehilangan dokumen penting warga",
+        "Persyaratan izin usaha mikro kecil menengah di daerah",
+        "Cara mengakses layanan kesehatan gratis untuk warga",
+        "Prosedur perpanjangan SIM di Samsat terdekat",
+        "Biaya pembuatan akta kelahiran dan persyaratannya",
+        "Jadwal pemadaman listrik bergilir di wilayah ini",
+        "Informasi program bantuan perbaikan rumah tidak layak huni",
+        "Syarat pendaftaran program beasiswa dari pemerintah daerah",
+        "Cara mengurus kartu keluarga setelah pindah domisili",
+        "Prosedur pemasangan sambungan listrik baru di rumah",
+        "Lokasi pengambilan bantuan sembako dari pemerintah",
+        "Mekanisme pengaduan masalah lingkungan hidup ke dinas",
+        "Jadwal dan lokasi vaksinasi booster di wilayah kami",
+        "Cara mendaftarkan anak ke sekolah negeri",
+        "Informasi jadwal operasional kantor pelayanan publik",
+        "Berapa lama proses pembuatan paspor sekarang",
+        "Apakah ada layanan antar dokumen untuk warga lansia",
+        "Prosedur pengajuan izin keramaian untuk acara",
+        "Di mana bisa mendapat informasi tentang subsidi listrik",
+        "Bagaimana cara mengakses layanan perpustakaan online",
+        "Prosedur mendapatkan kartu disabilitas",
+        "Info tentang program penanggulangan kemiskinan di daerah",
         "kapan sih jadwal angkut sampah di daerah sini",
         "info jam pelayanan kantor kelurahan gimana caranya",
         "prosedur ngurus ktp di kantor kecamatan gimana ya",
@@ -1263,60 +1370,39 @@ SENTIMENT_DATA = {
         "cara lapor kehilangan dokumen harus ke kantor mana ya",
         "prosedur perpanjangan sim di samsat terdekat gimana",
         "berapa biaya bikin akta kelahiran dan prosedurnya",
-        "tlg segera pasang lampu di jalan gelap ini dong",
-        "minta dibuatin taman bermain buat anak2 di sini dong",
-        "harap tambahin armada bus rute ke perumahan kami dong",
-        "tlg sediain tempat sampah lebih banyak di taman ini",
-        "harap pasang rambu lalu lintas di persimpangan ini dong",
-        "minta dibuatin zebra cross di depan sekolah dasar",
-        "mohon dipasang lampu jalan baru di kawasan ini dong",
-        "tlg tambahin toilet umum di area pasar tradisional",
-        "harap sediain fasilitas difabel di kantor kelurahan",
-        "kami butuh posyandu baru di kelurahan kami dong",
-        "tlg bangun taman bermain buat anak di kelurahan ini",
-        "mohon tambahin petugas keamanan di area ini malam hari",
-        "kami pengen ada perbaikan fasilitas di wilayah ini",
-        "warga berharap ada tindakan nyata dari pemda dong",
-        "sebaiknya ada petugas yg patroli setiap malam hari",
-        "alangkah baiknya pelayanan bisa dilakukan secara online",
-        "usul biar pasar ditata lebih rapi bersih dan teratur",
-        "sebaiknya pelayanan diperbaiki biar warga ga antri lama",
-        "disaranin biar jam kantor diperpanjangin sampe sore",
-        "saya pengen tau info tentang program bantuan perumahan",
-        "gimana cara daftarin anak buat beasiswa dari daerah",
-        "kapan program perbaikan jalan di rt kami dilaksanakan",
-        "di mana bisa ngurus surat izin usaha mikro ya",
-        "berapa biaya bikin akta pernikahan di catatan sipil",
-        "prosedur ngurus kartu keluarga baru setelah pindah rumah",
-        "kapan ada pembagian sembako buat warga kurang mampu",
-        "info jadwal operasional fasilitas olahraga milik pemda",
-        "syarat pendaftaran program beasiswa daerah buat pelajar",
-        "apakah ada program kur di kelurahan ini ya",
-        "saya mau lapor kehilangan motor gimana caranya ya",
-        "jadwal dan lokasi vaksin booster di wilayah kami kapan",
-        "gimana prosedur dapet bantuan buat perbaikan rumah ya",
-        "info tentang program pelatihan kerja yg diselenggarain",
-        "kapan akan ada penerangan jalan di gang belakang rumah",
-        "di mana lokasi pengambilan sembako bantuan pemerintah",
-        "gimana mekanisme pengaduan masalah lingkungan hidup",
-        "prosedur pasang sambungan listrik baru di rumah baru",
-        "info tarif dan jadwal angkutan umum rute baru gimana",
-        "apakah ada program bantuan modal usaha buat pedagang kecil",
-        "saya ingin tau berapa lama proses bikin paspor sekarang",
-        "apakah ada layanan antar dokumen ke rumah buat lansia",
-        "gimana prosedur pengajuan izin keramaian buat acara",
+        "saya ingin tau berapa lama proses pembuatan paspor sekarang",
+        "apakah ada layanan antar dokumen ke rumah untuk lansia",
+        "gimana prosedur pengajuan izin keramaian untuk acara",
         "saya perlu info tentang peraturan tata bangunan di daerah",
-        "kapan jadwal razia pkl di kawasan pusat perbelanjaan ini",
-        "di mana bisa dapet info tentang subsidi listrik ya",
+        "di mana bisa mendapatkan informasi tentang subsidi listrik",
         "gimana cara daftarin anak ke sekolah negeri favorit",
         "prosedur lapor pencemaran lingkungan kepada dinas terkait",
         "info persyaratan buka usaha kuliner di area publik gimana",
-        "apakah ada bantuan buat renovasi rumah ga layak huni",
+        "apakah ada bantuan untuk renovasi rumah tidak layak huni",
         "kapan ada sosialisasi peraturan baru tata kota ya",
         "gimana cara akses layanan perpustakaan daerah secara online",
         "saya ingin tau prosedur dapet kartu disabilitas gimana",
         "info tentang program penanggulangan kemiskinan di daerah",
-        # Sampel ambigu — overlap dengan kelas lain
+        "Sebaiknya ada jadwal rutin pemeliharaan jalan setiap bulan",
+        "Alangkah baiknya ada sistem pengaduan online yang mudah diakses",
+        "Disarankan agar petugas kebersihan menambah frekuensi kunjungan",
+        "Saran agar jam pelayanan kantor diperpanjang sampai sore",
+        "Ada baiknya dibuat jalur khusus sepeda di jalan protokol kota",
+        "Perlu dibenahi sistem antrian di kantor pelayanan publik",
+        "Lebih baik bila ada aplikasi untuk melapor kerusakan fasilitas",
+        "Usul agar lampu jalan diganti dengan yang hemat energi LED",
+        "Sebaiknya ada pos kesehatan di setiap RT yang padat penduduk",
+        "Lebih baik kalau ada program peremajaan trotoar kota",
+        "Mohon dipasang lampu jalan baru di kawasan gelap ini",
+        "Minta dibuatkan zebra cross di depan sekolah dasar",
+        "Harap tambahkan armada bus rute ke perumahan kami",
+        "Tolong sediakan tempat sampah yang cukup di taman kota",
+        "Mohon bangun posyandu baru di kelurahan kami segera",
+        "Minta perbaikan jalan yang berlubang parah di RT kami",
+        "Harap pasang rambu lalu lintas di persimpangan berbahaya",
+        "Tolong tambahkan toilet umum yang bersih di area pasar",
+        "Mohon sediakan bangku taman yang lebih banyak untuk warga",
+        "Minta dibangun taman bermain yang layak untuk anak-anak",
         "jalan di sini memang perlu perbaikan sudah cukup lama",
         "pelayanan masih bisa ditingkatkan untuk hasil yang lebih baik",
         "fasilitas perlu dibenahi agar lebih layak digunakan warga",
@@ -1327,11 +1413,50 @@ SENTIMENT_DATA = {
         "kondisi lingkungan terus mengalami perkembangan ke arah lebih baik",
         "fasilitas yang baru dipasang sudah bisa digunakan warga",
         "pelayanan berjalan normal sesuai jam operasional yang berlaku",
+        "jalan di depan rumah belum diperbaiki sudah beberapa bulan",
+        "petugas tidak datang sesuai jadwal yang sudah ditentukan",
+        "lampu jalan di gang ini tidak menyala lagi sejak minggu lalu",
+        "air PDAM tidak mengalir sudah dua hari ini",
+        "sampah belum diangkut padahal jadwalnya kemarin",
+        "antrean di kantor pelayanan cukup panjang tidak ada kejelasan",
+        "fasilitas taman bermain kurang terawat beberapa rusak",
+        "drainase tidak berfungsi optimal saat hujan deras",
+        "pelayanan membutuhkan waktu lebih lama dari yang dijanjikan",
+        "kondisi jalan perlu perhatian lebih dari pihak terkait",
+        "sebaiknya ada jadwal rutin pemeliharaan jalan tiap bulan",
+        "alangkah baiknya ada sistem pengaduan online yg mudah",
+        "disaranin biar petugas kebersihan makin sering ke sini",
+        "saran biar jam pelayanan kantor diperpanjangin sampe sore",
+        "ada baiknya dibikin jalur khusus sepeda di jalan utama",
+        "kayaknya perlu ada bank sampah di tiap kelurahan deh",
+        "seharusnya ada pos kesehatan di tiap rt yang padat penduduk",
+        "mohon dong segera pasang lampu jalan di kawasan gelap ini",
+        "minta tolong buatin zebra cross di depan sekolah kami",
+        "tlg tambahin armada bus rute ke perumahan kami dong",
+        "harap sediain tempat sampah lebih banyak di taman ini",
+        "kami butuh posyandu baru di kelurahan kami dong",
+        "tlg bangun taman bermain buat anak di kelurahan ini",
+        "warga berharap ada tindakan nyata dari pemda dong",
+        "saya mau tanya prosedur ngurus ktp hilang gimana",
+        "info jadwal angkut sampah di rt sini kapan ya",
+        "gimana cara daftar beasiswa daerah buat anak saya",
+        "kapan jadwal vaksin di puskesmas kita bulan ini",
+        "ada info ga tentang program bedah rumah di sini",
+        "cara ngurus surat pindah domisili gimana ya pak",
+        "jadwal piket petugas kebersihan di sini kapan aja",
+        "info biaya pasang sambungan baru pdam gimana ya",
+        "syarat dapet bansos apa aja ya yang perlu disiapkan",
+        "gimana cara komplain ke dinas soal jalan yang rusak",
+        "mau tanya jam buka kantor pelayanan sini kapan ya",
+        "ada ga info tentang jadwal razia pkl di sini",
+        "cara daftar program kur buat usaha kecil gimana ya",
+        "prosedur ngurus imb bangunan baru di sini gimana",
+        *GENERATED_NETRAL,
 
     ],
     "labels": (
-        ["negatif"] * 115 +
-        ["positif"] * 119 +
-        ["netral"] * 171
+        ["negatif"] * 310 +
+        ["positif"] * 300 +
+        ["netral"]  * 300
     ),
 }

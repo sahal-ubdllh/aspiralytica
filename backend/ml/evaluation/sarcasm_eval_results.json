@@ -1,0 +1,60 @@
+{
+  "tp": 22,
+  "fp": 1,
+  "tn": 12,
+  "fn": 4,
+  "n": 39,
+  "precision_sarcasm": 0.9565,
+  "recall_sarcasm": 0.8462,
+  "f1_sarcasm": 0.898,
+  "precision_nonsarcasm": 0.75,
+  "recall_nonsarcasm": 0.9231,
+  "f1_nonsarcasm": 0.8276,
+  "accuracy": 0.8718,
+  "macro_f1": 0.8628,
+  "weighted_f1": 0.8745,
+  "layer_distribution": {
+    "1b": 12,
+    "1a": 2,
+    "3": 3,
+    "4": 3,
+    "5": 3
+  },
+  "layer_precision": {
+    "1b": 1.0,
+    "1a": 1.0,
+    "3": 1.0,
+    "4": 1.0,
+    "5": 0.6667
+  },
+  "false_positives": [
+    {
+      "text": "jalan di depan rumah rusak parah sudah berbulan-bulan mohon diperbaiki",
+      "category": "TN_complaint",
+      "fired_layer": "5",
+      "pos_hits": [],
+      "neg_hits": [
+        "rusak",
+        "parah"
+      ]
+    }
+  ],
+  "false_negatives": [
+    {
+      "text": "top banget nih instansinya, sampah numpuk ga diangkut",
+      "category": "Layer1b"
+    },
+    {
+      "text": "mantap beneran petugasnya, ga ada tindakan sama sekali",
+      "category": "Layer2"
+    },
+    {
+      "text": "luar biasa ya antreannya, 6 jam belum juga dilayani",
+      "category": "edge_exclamation"
+    },
+    {
+      "text": "terima kasih banyak atas perhatiannya yang luar biasa, bertahun dibiarkan",
+      "category": "edge_extended"
+    }
+  ]
+}

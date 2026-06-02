@@ -1,35 +1,35 @@
 ASPIRALYTICA — TRAINING REPORT
-Generated: 2026-05-21 14:39:36
+Generated: 2026-05-26 06:51:51
 =======================================================
 
 MODEL SENTIMEN
 ----------------------------------------
-Accuracy  : 0.9554 ± 0.0350
-F1-Score  : 0.9548 ± 0.0359
+Accuracy  : 0.9659 ± 0.0104
+F1-Score  : 0.9659 ± 0.0103
 
               precision    recall  f1-score   support
 
-     negatif       1.00      1.00      1.00       115
-      netral       1.00      1.00      1.00       171
-     positif       1.00      1.00      1.00       119
+     negatif       0.99      0.99      0.99       310
+      netral       0.99      0.99      0.99       300
+     positif       1.00      1.00      1.00       300
 
-    accuracy                           1.00       405
-   macro avg       1.00      1.00      1.00       405
-weighted avg       1.00      1.00      1.00       405
+    accuracy                           0.99       910
+   macro avg       0.99      0.99      0.99       910
+weighted avg       0.99      0.99      0.99       910
 
 MODEL INTENT
 ----------------------------------------
-Accuracy  : 0.9362 ± 0.0266
-F1-Score  : 0.9359 ± 0.0265
+Accuracy  : 0.9697 ± 0.0106
+F1-Score  : 0.9696 ± 0.0106
 
               precision    recall  f1-score   support
 
-   apresiasi       1.00      1.00      1.00       141
-     darurat       1.00      1.00      1.00       130
-     keluhan       1.00      1.00      1.00       273
-  permintaan       1.00      0.99      1.00       154
-       saran       0.99      1.00      1.00       149
+   apresiasi       0.99      1.00      1.00       350
+     darurat       1.00      1.00      1.00       350
+     keluhan       0.99      0.98      0.99       350
+  permintaan       1.00      1.00      1.00       350
+       saran       0.99      0.99      0.99       350
 
-    accuracy                           1.00       847
-   macro avg       1.00      1.00      1.00       847
-weighted avg       1.00      1.00      1.00       847
+    accuracy                           1.00      1750
+   macro avg       1.00      1.00      1.00      1750
+weighted avg       1.00      1.00      1.00      1750

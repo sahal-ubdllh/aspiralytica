@@ -1,0 +1,66 @@
+[
+  {
+    "task": "sentiment",
+    "variant": "Rule-Based Only",
+    "accuracy": "0.8319 \u00b1 0.0236",
+    "precision": "0.8342 \u00b1 0.0230",
+    "recall": "0.8319 \u00b1 0.0236",
+    "f1": "0.8310 \u00b1 0.0242"
+  },
+  {
+    "task": "sentiment",
+    "variant": "ML Only (TF-IDF + MNB)",
+    "accuracy": "0.9659 \u00b1 0.0104",
+    "precision": "0.9671 \u00b1 0.0101",
+    "recall": "0.9659 \u00b1 0.0104",
+    "f1": "0.9659 \u00b1 0.0103"
+  },
+  {
+    "task": "sentiment",
+    "variant": "ML + Sarcasm Detection",
+    "accuracy": "0.9681 \u00b1 0.0125",
+    "precision": "0.9693 \u00b1 0.0123",
+    "recall": "0.9681 \u00b1 0.0125",
+    "f1": "0.9682 \u00b1 0.0124"
+  },
+  {
+    "task": "sentiment",
+    "variant": "Hybrid (Full System)",
+    "accuracy": "0.8912 \u00b1 0.0211",
+    "precision": "0.9004 \u00b1 0.0193",
+    "recall": "0.8912 \u00b1 0.0211",
+    "f1": "0.8905 \u00b1 0.0214"
+  },
+  {
+    "task": "intent",
+    "variant": "Rule-Based Only",
+    "accuracy": "0.6920 \u00b1 0.0299",
+    "precision": "0.8191 \u00b1 0.0141",
+    "recall": "0.6920 \u00b1 0.0299",
+    "f1": "0.7006 \u00b1 0.0332"
+  },
+  {
+    "task": "intent",
+    "variant": "ML Only (TF-IDF + MNB)",
+    "accuracy": "0.9697 \u00b1 0.0106",
+    "precision": "0.9702 \u00b1 0.0107",
+    "recall": "0.9697 \u00b1 0.0106",
+    "f1": "0.9696 \u00b1 0.0106"
+  },
+  {
+    "task": "intent",
+    "variant": "ML + Sarcasm Detection",
+    "accuracy": "0.9537 \u00b1 0.0118",
+    "precision": "0.9562 \u00b1 0.0105",
+    "recall": "0.9537 \u00b1 0.0118",
+    "f1": "0.9537 \u00b1 0.0117"
+  },
+  {
+    "task": "intent",
+    "variant": "Hybrid (Full System)",
+    "accuracy": "0.8994 \u00b1 0.0220",
+    "precision": "0.9117 \u00b1 0.0173",
+    "recall": "0.8994 \u00b1 0.0220",
+    "f1": "0.8999 \u00b1 0.0218"
+  }
+]

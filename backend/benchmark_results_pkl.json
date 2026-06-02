@@ -1,0 +1,69 @@
+{
+  "meta": {
+    "task": "sentiment",
+    "model_file": "ml/models/sentiment_model.pkl",
+    "file_size_on_disk_kb": 227.27734375,
+    "inference_text_length": "medium",
+    "inference_text": "jalan rusak parah sudah berbulan bulan tidak ada yang memperbaiki mohon segera ditangani",
+    "iterations": 1000,
+    "warmup": 10
+  },
+  "results": {
+    "Multinomial Naive Bayes": {
+      "latency_mean_ms": 0.3955,
+      "latency_std_ms": 0.0476,
+      "latency_min_ms": 0.3658,
+      "latency_max_ms": 1.3635,
+      "latency_p95_ms": 0.4551,
+      "latency_p99_ms": 0.5889,
+      "model_size_kb": 27.26,
+      "model_size_mb": 0.0266,
+      "inference_peak_mem_kb": 14.89,
+      "cpu_time_per_call_ms": 0.3906,
+      "cpu_efficiency_pct": 99.67,
+      "throughput_rps": 52312.2
+    },
+    "SVM (LinearSVC)": {
+      "latency_mean_ms": 0.381,
+      "latency_std_ms": 0.0295,
+      "latency_min_ms": 0.3589,
+      "latency_max_ms": 0.6555,
+      "latency_p95_ms": 0.4262,
+      "latency_p99_ms": 0.5197,
+      "model_size_kb": 18.61,
+      "model_size_mb": 0.0182,
+      "inference_peak_mem_kb": 13.35,
+      "cpu_time_per_call_ms": 0.3906,
+      "cpu_efficiency_pct": 99.62,
+      "throughput_rps": 52061.6
+    },
+    "Logistic Regression": {
+      "latency_mean_ms": 0.3935,
+      "latency_std_ms": 0.0233,
+      "latency_min_ms": 0.369,
+      "latency_max_ms": 0.5989,
+      "latency_p95_ms": 0.4335,
+      "latency_p99_ms": 0.4802,
+      "model_size_kb": 18.69,
+      "model_size_mb": 0.0183,
+      "inference_peak_mem_kb": 14.87,
+      "cpu_time_per_call_ms": 0.3906,
+      "cpu_efficiency_pct": 98.01,
+      "throughput_rps": 53809.7
+    },
+    "Random Forest": {
+      "latency_mean_ms": 2.7649,
+      "latency_std_ms": 0.0881,
+      "latency_min_ms": 2.6534,
+      "latency_max_ms": 3.4734,
+      "latency_p95_ms": 2.9241,
+      "latency_p99_ms": 3.1035,
+      "model_size_kb": 259.35,
+      "model_size_mb": 0.2533,
+      "inference_peak_mem_kb": 27.18,
+      "cpu_time_per_call_ms": 2.8125,
+      "cpu_efficiency_pct": 101.13,
+      "throughput_rps": 20713.8
+    }
+  }
+}
