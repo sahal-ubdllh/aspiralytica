@@ -76,7 +76,7 @@ export default function InputScreen({ navigation }: any) {
             placeholder="Contoh: Jalan di depan sekolah rusak parah dan berbahaya untuk pengendara. Sudah dilaporkan berkali-kali tapi belum diperbaiki..."
             placeholderTextColor={Colors.textMuted}
             multiline
-            maxLength={500}
+            maxLength={1000}
             value={text}
             onChangeText={setText}
             textAlignVertical="top"
@@ -102,7 +102,7 @@ export default function InputScreen({ navigation }: any) {
           <Text style={styles.tipsTitle}>💡 Tips agar analisis akurat:</Text>
           <Text style={styles.tipItem}>• Tulis dengan jelas dan spesifik</Text>
           <Text style={styles.tipItem}>• Sertakan lokasi atau konteks jika perlu</Text>
-          <Text style={styles.tipItem}>• Minimal 10 karakter, maksimal 500 karakter</Text>
+          <Text style={styles.tipItem}>• Minimal 10 karakter, maksimal 1000 karakter</Text>
         </View>
 
         {/* Tombol Analisis */}
